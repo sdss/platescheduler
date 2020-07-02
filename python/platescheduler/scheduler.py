@@ -1,9 +1,10 @@
 # encoding: utf-8
 
 import numpy as np
+import scipy.optimize as optimize
 
 from roboscheduler.scheduler import Observer
-from cadence import Cadence
+from .cadence import Cadence
 
 
 class Scheduler(object):
@@ -25,7 +26,7 @@ class Scheduler(object):
 
         # Mike did a great job setting up bright/dark/observability rules
         # we'll just borrow that
-        self.Observer = Observer(observatory="apo")
+        self.Observer = Observer(observatory="apo", bright_twilight=-12)
         self.airmass_limit = airmass_limit
         self.dark_limit = dark_limit
 
@@ -106,10 +107,14 @@ class Scheduler(object):
 
         self._carts = {
             1: "BOTH",
-            1: "BOTH",
-            1: "BOTH",
-            1: "BOTH",
-            1: "BOSS",
+            2: "BOTH",
+            3: "BOTH",
+            4: "BOTH",
+            5: "BOSS",
+            6: "BOTH",
+            7: "BOTH",
+            8: "BOTH",
+            9: "BOTH",
         }
 
     @property
@@ -162,21 +167,21 @@ class Scheduler(object):
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
         """
-        night_start = self.Observer.morning_twilight(mjd)
-         = self.Observer.evening_twilight(mjd)
+        night_start = self.Observer.evening_twilight(mjd)
+        night_end = self.Observer.morning_twilight(mjd)
         nightLength = night_end - night_start
 
-        bright_start = self.Observer.skybrightness(night_start) >= 0.35
-        bright_end = self.Observer.skybrightness(night_end) >= 0.35
-        dark_start = self.Observer.skybrightness(night_start) < 0.35
-        dark_end = self.Observer.skybrightness(night_end) < 0.35
+        bright_start = bool(self.Observer.skybrightness(night_start + 1 / 24) >= 0.35)
+        bright_end = bool(self.Observer.skybrightness(night_end - 1 / 24) >= 0.35)
+        dark_start = bool(self.Observer.skybrightness(night_start + 1 / 24) < 0.35)
+        dark_end = bool(self.Observer.skybrightness(night_end - 1 / 24) < 0.35)
 
         short_slot = (30 + 20) / 60 / 24  # 30 min GG size
         dark_slot = (67 + 20) / 60 / 24
 
         split_night = False
         if bright_start and bright_end:
-            bright_slots = nightLength // short_slot
+            bright_slots = int(nightLength // short_slot)
             rm_slots = 0
             dark_slots = 0
         elif dark_start and dark_end:
@@ -184,7 +189,7 @@ class Scheduler(object):
             # even if it isn't first or last it's easier this way
             remainder = nightLength - 2/24
             rm_slots = 1
-            dark_slots = remainder // dark_slot
+            dark_slots = int(remainder // dark_slot)
             extra = remainder % (dark_slots * dark_slot)
             if extra >= 67 / 60 / 24:
                 # we can ignore a second overhead on a full darknight
@@ -197,7 +202,7 @@ class Scheduler(object):
         elif dark_start and bright_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start, night_end,
+                              night_start + 1 / 24, night_end - 1 / 24,
                               args=self.dark_limit)
             bright_time = night_end - split
             dark_time = split - night_start
@@ -205,7 +210,7 @@ class Scheduler(object):
         elif bright_start and dark_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start, night_end,
+                              night_start + 1 / 24, night_end - 1 / 24,
                               args=self.dark_limit)
             bright_time = split - night_start 
             dark_time = night_end - split
@@ -213,14 +218,14 @@ class Scheduler(object):
             raise Exception("You broke boolean algebra!")
 
         if split_night:
-            bright_slots = bright_time // short_slot
+            bright_slots = int(bright_time // short_slot)
             if dark_time > 2 / 24:
                 # again assume the free overhead is for RM exposure
                 rm_slots = 1
                 dark_time = dark_time - 2 / 24
             else:
                 rm_slots = 0
-            dark_slots = dark_time // dark_slot
+            dark_slots = int(dark_time // dark_slot)
 
             extra = dark_time % (dark_slots * dark_slot)
             if extra >= 67 / 60 / 24 and rm_slots == 0:
@@ -232,9 +237,35 @@ class Scheduler(object):
 
         slots = np.sum([bright_slots, dark_slots, rm_slots])
         if slots > len(self.carts):
-            # we take from bright carts
-            # 2 at a time after merging the first 2
-            # bright_slots-(2n-1) = carts-dark_slots
-            n = (dark_slots + rm_slots + bright_slots - len(carts) + 1) / 2
-            assert n % 1 == 0, "You over-estimated your math skills!"
-            bright_slots = bright_slots - 2 * n + 1
+            used = dark_slots + rm_slots
+            avail = len(self.carts) - used
+            n = bright_slots - avail
+            if n <= 0:
+                bright_slots_short = bright_slots
+                bright_slots_long = 0
+            else:
+                bright_slots_short = bright_slots - 2*n
+                bright_slots_long = n
+            if bright_slots_short < 0:
+                # this came up briefly in testing
+                bright_slots_short = 0
+            if bright_slots_long > avail:
+                # this also came up in testing with
+                # small number of carts, shouldn't happen in practice but...
+                bright_slots_long = avail
+            assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
+                    <= len(self.carts), "cart assignment made up extra carts!"
+        else:
+            bright_slots_short = bright_slots
+            bright_slots_long = 0
+
+        bright_lengths = [30 + 20 for i in range(bright_slots_short)]
+        bright_lengths.extend([67 + 20 for i in range(bright_slots_long)])
+        dark_lengths = [67 + 20 for i in range(dark_slots)]
+        rm_lengths = [120 for i in range(rm_slots)]
+
+        all_lengths = np.sum(bright_lengths) + np.sum(dark_lengths) + np.sum(rm_lengths)
+
+        waste = nightLength - all_lengths / 60 /24
+
+        return bright_lengths, dark_lengths, rm_lengths, waste
