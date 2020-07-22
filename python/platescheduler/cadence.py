@@ -3,37 +3,39 @@
 import numpy as np
 
 
-def rmCadence(mjd, hist=[]):
+def rmCadence(mjd, hist=[], **kwargs):
     """cadence requirements for RM
 
-    Request: 10 epochs per month, month being dark run
-    so check the last 15 days. This may bleed over too
-    much from previous dark run? It shouldn't though,
-    not with a bright run in-between
+    Request: 10 epochs per month, a dark run is entirely between full moons
+
+    For now: if it hasn't been 10, do it! Could add more complicated logic, e.g.
+    wait a day if it's near beginning of run, cram at the end
 
     mjd: float or int should be ok
 
     hist: list, list of previous MJDs
     """
+    last_full_moon = kwargs.get("last_full_moon", 0)
 
     if len(hist) == 0:
         return True
 
-    deltas = mjd - np.array(hist)
-    this_month = np.where(deltas < 15)
+    deltas = np.array(hist) - last_full_moon
+    this_month = np.where(deltas > 0)
 
     return len(this_month[0]) < 10
 
 
-def AQMESmedium(mjd, hist=[]):
+def AQMESmedium(mjd, hist=[], **kwargs):
     """cadence requirements for AQMES-Medium
 
-    Request: 6 epochs, 1/month, again assume 15-day run
+    Request: 6 epochs, 1/month
 
     mjd: float or int should be ok
 
     hist: list, list of previous MJDs
     """
+    last_full_moon = kwargs.get("last_full_moon", 0)
 
     if len(hist) == 0:
         return True
@@ -41,13 +43,14 @@ def AQMESmedium(mjd, hist=[]):
     if len(hist) > 6:
         return False
 
-    delta = mjd - np.max(hist)
+    deltas = np.array(hist) - last_full_moon
+    this_month = np.where(deltas > 0)
     
     # make sure it's been at least since last run
-    return delta > 15
+    return len(this_month[0]) == 0
 
 
-def single(mjd, hist=[]):
+def single(mjd, hist=[], **kwargs):
     """cadence requirements for single-epoch
 
     Request: single epoch
@@ -60,7 +63,7 @@ def single(mjd, hist=[]):
     return len(hist) == 0
 
 
-def yso(mjd, hist=[]):
+def yso(mjd, hist=[], **kwargs):
     """cadence requirements for YSO
 
     Request: 3 epochs, ~3 days, then ~20 days
@@ -81,7 +84,7 @@ def yso(mjd, hist=[]):
         return False
 
 
-def rv6(mjd, hist=[]):
+def rv6(mjd, hist=[], **kwargs):
     """cadence requirements for 6-visit RV plates
 
     Request: 6 total, ~3 per month, ideally within 1 week
@@ -107,7 +110,7 @@ def rv6(mjd, hist=[]):
     return np.min(deltas) > 2
 
 
-def rv12(mjd, hist=[]):
+def rv12(mjd, hist=[], **kwargs):
     """cadence requirements for 12-visit RV plates
 
     Request: 12 total, ~3 per month, ideally within 1 week
@@ -133,7 +136,7 @@ def rv12(mjd, hist=[]):
     return np.min(deltas) > 2
 
 
-def tess(mjd, hist=[]):
+def tess(mjd, hist=[], **kwargs):
     """cadence requirements for tess
 
     Request: 2 observations?

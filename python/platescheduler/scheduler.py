@@ -14,13 +14,8 @@ class Scheduler(object):
 
     def __init__(self, platePath=None, airmass_limit=2., dark_limit=0.35):
         self.platePath = platePath
-        self._plates = None  # may not need this
-        # self._ras = None
-        # self._decs = None
-        # self._priorities = None
-        # self._lunations = None
+        self._plates = None
         self._cadences = None
-        # self._programs = None
         self._obs_query = None  # stash raw result probably
         self._obs_hist = None
         self._carts = None
@@ -32,6 +27,9 @@ class Scheduler(object):
         self.Observer = Observer(observatory="apo", bright_twilight=-12)
         self.airmass_limit = airmass_limit
         self.dark_limit = dark_limit
+        
+        self.moon_threshold = 15.
+        self._last_full_moon = None
 
 
     def getObs(self):
@@ -109,7 +107,24 @@ class Scheduler(object):
         return self._carts
 
 
-    def observable(self, plates, mjd=None, check_cadence=True):
+    def _inverseMoon(mjd):
+        return -1 * self.Observer.moon_illumination(mjd)
+
+
+    def last_full_moon(self, mjd):
+        d_moon_dt = optminimize.approx_fprime(mjd, self.Observer.moon_illumination, 0.5)
+
+        if d_moon_dt > 0:
+            # waxing, go way back
+            res = optminimize.minimize(inverseMoon, mjd-15, bounds=[[mjd-40, mjd+0.1]])
+        else:
+            # waning
+            res = optminimize.minimize(inverseMoon, mjd, bounds=[[mjd-27, mjd+1]])
+        self._last_full_moon = float(res.x)
+        return self._last_full_moon
+
+
+    def observable(self, plates, mjd=None, check_cadence=True, duration=60.):
         """Return array of plates observable
 
         Parameters:
@@ -121,25 +136,50 @@ class Scheduler(object):
         check_cadence: Boolean
             is it safe to ignore cadence requirements? Usually not,
             but if we already failed a check maybe we should.
+
+        duration: float, int
+            duration in minutes; will be converted to decimal days
         """
 
-        (alt, az) = self.Observer.radec2altaz(mjd=mjd, ra=plates["RA"],
-                                     dec=plates["DEC"])
-        airmass = self.Observer.alt2airmass(alt)
+        window_lst_start = self.Observer.lst(mjd) / 15.
+        window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
+
+        in_window = [True for p in plates]
+
+        for p, w in zip(plates, in_window):
+            start = (p["RA"] + p["HA_MAX"]) / 15.
+            end = (p["RA"] + p["HA_MIN"]) / 15.
+            start_diff = lstDiff(start, window_lst_start)
+            end_diff = lstDiff(end, window_lst_end)
+            if start_diff > 0:
+                # start is less than window start
+                w = False
+            elif end_diff < 0:
+                w = False
+
+        moonra, moondec = self.Observer.moon_radec(mjd)
+
+        moon_dist = np.power((plates["RA"] - moonra)*np.cos(plates["DEC"]*np.pi), 2)\
+                  + np.power((plates["DEC"] - moondec), 2)
+
+        # (alt, az) = self.Observer.radec2altaz(mjd=mjd, ra=plates["RA"],
+        #                              dec=plates["DEC"])
+        # airmass = self.Observer.alt2airmass(alt)
         skybrightness = self.Observer.skybrightness(mjd)
 
-        observable = (alt > 0.) & (airmass < self.airmass_limit)\
-                     & (skybrightness < plates["SKYBRIGHTNESS"])
+        observable = (moon_dist > self.moon_threshold) & in_window\
+                     & (skybrightness < plates["SKYBRIGHTNESS"])\
 
         if(check_cadence):
             for p, o in zip(plates, observable):
                 if o and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
-                    o = self.cadences[cad](self.obs_hist[field])
+                    o = self.cadences[cad](self.obs_hist[field], last_full_moon=self._last_full_moon)
 
 
         return plates[observable]
+
 
     def prioritize(self, plates):
         """prioritize observable plates
@@ -392,6 +432,7 @@ class Scheduler(object):
                     b["plateid"] = gg_obs[highest]["PLATE_ID"]
 
         if night_sched["dark_start"] > 0:
+            last_full_moon(mjd)
             if len(rm_lengths) > 0:
                 w_rm = np.where([c == "RM" for c in self.plates["CADENCE"]])
                 
@@ -479,7 +520,7 @@ class Scheduler(object):
                     highest = np.argmax(slot_priorities)
                     b["plateid"] = aqmes_plates[highest]["PLATE_ID"]
 
-    return bright_starts, dark_starts
+        return bright_starts, dark_starts
 
     # don't forget to match plates at different hour angles
 
@@ -492,3 +533,57 @@ def isWithinSlot(starts, mjd, delta):
         return None
 
     return w_within[0][0]
+
+
+def lstDiff(a, b):
+    """Intelligently find signed difference in 2 lsts, b-a
+
+    Assuming a clockwise coordinate system that wraps at 24=0
+
+    A value ahead clockwise is "larger" for subtraction purposes,
+    even if it is on the other side of zero.
+
+    Parameters:
+    -----------
+
+    a : np.float32, float
+        first lst in hours
+    b : np.float32, float
+        second lst in hours
+
+    Returns:
+    --------
+
+    diff: float
+        b-a, wrapped correctly
+
+    Comments:
+    ---------
+
+    """
+
+    if a < b:
+        # if a is closer going through zero, wrap is used
+        # meaning a is clockwise of a, technically ahead of it
+        # so its direction is negative
+        simple = b - a
+        wrap = a + 24 - b
+
+        if wrap < simple:
+            return -wrap
+        else:
+            return simple
+    else:
+        # a is greater, but direction is tricky
+        simple = b - a  # always negative now
+        wrap = b + 24 - a  # always positive
+
+        # if wrap < abs(simple), it is closer to go through zero again
+        # in this case though that means b is clockwise a
+        # so wrap is appropriately positive
+        # otherwise simple is appropriately negative
+
+        if wrap < abs(simple):
+            return wrap
+        else:
+            return simple
