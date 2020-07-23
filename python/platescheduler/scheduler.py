@@ -2,6 +2,7 @@
 
 import numpy as np
 import scipy.optimize as optimize
+import fitsio
 
 from roboscheduler.scheduler import Observer
 from .cadence import assignCadence
@@ -15,9 +16,10 @@ class Scheduler(object):
     def __init__(self, platePath=None, airmass_limit=2., dark_limit=0.35):
         self.platePath = platePath
         self._plates = None
-        self._cadences = None
-        self._obs_query = None  # stash raw result probably
-        self._obs_hist = None
+        self._plateIDtoField = None
+        self._cadences = {}
+        self._obs_query = []  # stash raw result probably
+        self.obs_hist = {}
         self._carts = None
 
         self.bright_cadences = ["YSO", "RV6", "RV12"]
@@ -27,7 +29,7 @@ class Scheduler(object):
         self.Observer = Observer(observatory="apo", bright_twilight=-12)
         self.airmass_limit = airmass_limit
         self.dark_limit = dark_limit
-        
+
         self.moon_threshold = 15.
         self._last_full_moon = None
 
@@ -47,24 +49,13 @@ class Scheduler(object):
         """
 
         self._plates = fitsio.read(self.platePath)
+        self._plateIDtoField = dict()
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
-
-
-    @property    
-    def obs_hist(self):
-        # this is temporary
-        # need to hook into DB and establish AB pairs, etc probably?
-        if self._obs_hist is None:
-            self._obs_hist = dict()
-            hist = self.getObs()
-            for h in hist:
-                if h["FIELD"] in self._obs_hist:
-                    self._obs_hist[h["FIELD"]].append(h["MJD"])
-                else:
-                    self._obs_hist[h["FIELD"]] = [h["MJD"]]
+            self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
+            self.obs_hist[p["FIELD"]] = []
 
 
     @property
@@ -107,19 +98,19 @@ class Scheduler(object):
         return self._carts
 
 
-    def _inverseMoon(mjd):
+    def _inverseMoon(self, mjd):
         return -1 * self.Observer.moon_illumination(mjd)
 
 
     def last_full_moon(self, mjd):
-        d_moon_dt = optminimize.approx_fprime(mjd, self.Observer.moon_illumination, 0.5)
+        d_moon_dt = optimize.approx_fprime(mjd, self.Observer.moon_illumination, 0.5)
 
         if d_moon_dt > 0:
             # waxing, go way back
-            res = optminimize.minimize(inverseMoon, mjd-15, bounds=[[mjd-40, mjd+0.1]])
+            res = optimize.minimize(self._inverseMoon, mjd-15, bounds=[[mjd-40, mjd+0.1]])
         else:
             # waning
-            res = optminimize.minimize(inverseMoon, mjd, bounds=[[mjd-27, mjd+1]])
+            res = optimize.minimize(self._inverseMoon, mjd, bounds=[[mjd-27, mjd+1]])
         self._last_full_moon = float(res.x)
         return self._last_full_moon
 
@@ -191,7 +182,7 @@ class Scheduler(object):
         base = base + np.array(pri_ten)
 
         # gaussian de-weight for easier plates
-        dec = base - 50.0 * np.power(np.exp(-(plates["DEC"] - 33), 2) / (2 * (20)**2))
+        dec = base - 50.0 * np.power(np.exp(-1 * (plates["DEC"] - 33)), 2) / (2 * 20**2)
 
         # TO-DO: possibly add weight by some delta-times, passed from cadence check?
 
@@ -351,11 +342,13 @@ class Scheduler(object):
                 priorities = list()
                 plate_ids = list()
                 for l in long_slots:
-                    b_long_obs = observable(self.plates[w_bright_long], mjd=l, check_cadence=True)
+                    b_long_obs = self.observable(self.plates[w_bright_long], mjd=l, check_cadence=True)
+                    if len(b_long_obs) == 0:
+                        continue
                     slot_priorities = self.prioritize(b_long_obs)
                     highest = np.argmax(slot_priorities)
                     priorities.append(slot_priorities[highest])
-                    plate_ids.append(plates[highest]["PLATE_ID"])
+                    plate_ids.append(b_long_obs[highest]["PLATE_ID"])
 
                 # sort fields into descending priority order
                 # track index of each, so we can use plate_ids and long_slots
@@ -365,6 +358,9 @@ class Scheduler(object):
                 long_plates = list()
                 i = 0  # for iterating in while loop
                 while len(long_starts) < len(long_bright):
+                    if i >= len(priority_order):
+                        long_starts.append(-1)
+                        long_plates.append(-1)
                     idx = priority_order[i]
                     long_starts.append(long_slots[idx])
                     long_plates.append(plate_ids[idx])
@@ -381,7 +377,7 @@ class Scheduler(object):
                         })
                     now += 87 / 60 / 24
 
-                while len(bright_starts) < (gg_len + long_bright):
+                while len(bright_starts) < (len(gg_len) + len(long_bright)):
                     long_check = isWithinSlot(long_starts, now, 50)
 
                     if long_check is not None:
@@ -407,7 +403,7 @@ class Scheduler(object):
             else:
                 # all short, that's easier
                 now = night_sched["bright_start"]
-                while len(bright_starts) < (gg_len):
+                while len(bright_starts) < len(gg_len):
                     bright_starts.append({"start": now,
                                           "length": 50,
                                           "plateid": None
@@ -426,13 +422,13 @@ class Scheduler(object):
             for b in bright_starts:
                 # now fill in GG plates as needed
                 if b["plateid"] is None:
-                    gg_obs = observable(self.plates[w_gg], mjd=b["start"], check_cadence=True)
+                    gg_obs = self.observable(self.plates[w_gg], mjd=b["start"], check_cadence=True)
                     slot_priorities = self.prioritize(gg_obs)
                     highest = np.argmax(slot_priorities)
                     b["plateid"] = gg_obs[highest]["PLATE_ID"]
 
         if night_sched["dark_start"] > 0:
-            last_full_moon(mjd)
+            self.last_full_moon(mjd)
             if len(rm_lengths) > 0:
                 w_rm = np.where([c == "RM" for c in self.plates["CADENCE"]])
                 
@@ -440,11 +436,13 @@ class Scheduler(object):
                 priorities = list()
                 plate_ids = list()
                 for l in rm_slots:
-                    b_long_obs = observable(self.plates[w_rm], mjd=l, check_cadence=True)
-                    slot_priorities = self.prioritize(b_long_obs)
+                    rm_obs = self.observable(self.plates[w_rm], mjd=l, check_cadence=True)
+                    if len(rm_obs) == 0:
+                        continue
+                    slot_priorities = self.prioritize(rm_obs)
                     highest = np.argmax(slot_priorities)
                     priorities.append(slot_priorities[highest])
-                    plate_ids.append(plates[highest]["PLATE_ID"])
+                    plate_ids.append(rm_obs[highest]["PLATE_ID"])
 
                 # sort fields into descending priority order
                 # track index of each, so we can use plate_ids and long_slots
@@ -454,6 +452,9 @@ class Scheduler(object):
                 rm_plates = list()
                 i = 0  # for iterating in while loop
                 while len(rm_starts) < len(rm_lengths):
+                    if i >= len(priority_order):
+                        rm_starts.append(-1)
+                        rm_plates.append(-1)
                     idx = priority_order[i]
                     rm_starts.append(rm_slots[idx])
                     rm_plates.append(plate_ids[idx])
@@ -470,7 +471,7 @@ class Scheduler(object):
                         })
                     now += 120 / 60 / 24
 
-                while len(dark_starts) < (dark_lengths + rm_lengths):
+                while len(dark_starts) < (len(dark_lengths) + len(rm_lengths)):
                     long_check = isWithinSlot(rm_starts, now, 50)
 
                     if long_check is not None:
@@ -496,12 +497,12 @@ class Scheduler(object):
 
             else:
                 now = night_sched["dark_start"]
-                while len(dark_starts) < (dark_lengths):
-                    bright_starts.append({"start": now,
+                while len(dark_starts) < len(dark_lengths):
+                    dark_starts.append({"start": now,
                                           "length": 80,
                                           "plateid": None
                         })
-                    now = night_sched["start"] + 80 / 60 / 24
+                    now = now + 80 / 60 / 24
 
                 # strip overhead appropriately
                 # except petunia doesn't care about overhead... leave it alone for now
@@ -515,7 +516,9 @@ class Scheduler(object):
 
             for b in dark_starts:
                 if b["plateid"] is None:
-                    aqmes_plates = observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True)
+                    aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True)
+                    if len(aqmes_plates) == 0:
+                        continue
                     slot_priorities = self.prioritize(aqmes_plates)
                     highest = np.argmax(slot_priorities)
                     b["plateid"] = aqmes_plates[highest]["PLATE_ID"]
