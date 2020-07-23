@@ -156,18 +156,19 @@ class Scheduler(object):
         # (alt, az) = self.Observer.radec2altaz(mjd=mjd, ra=plates["RA"],
         #                              dec=plates["DEC"])
         # airmass = self.Observer.alt2airmass(alt)
-        skybrightness = self.Observer.skybrightness(mjd)
+        # check skybrightness half way through so we aren't recording twilight
+        # otherwise we'll lose dark programs
+        skybrightness = self.Observer.skybrightness(mjd + duration / 60 / 24 / 2)
 
         observable = (moon_dist > self.moon_threshold) & in_window\
-                     & (skybrightness < plates["SKYBRIGHTNESS"])\
+                     & (skybrightness <= plates["SKYBRIGHTNESS"])
 
         if(check_cadence):
-            for p, o in zip(plates, observable):
-                if o and p["PRIORITY"] < 10:
+            for i, p in enumerate(plates):
+                if observable[i] and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
-                    o = self.cadences[cad](self.obs_hist[field], last_full_moon=self._last_full_moon)
-
+                    observable[i] = self.cadences[cad](mjd, hist=self.obs_hist[field], last_full_moon=self._last_full_moon)
 
         return plates[observable]
 
@@ -547,6 +548,7 @@ class Scheduler(object):
                 if b["plateid"] is None:
                     aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True)
                     if len(aqmes_plates) == 0:
+                        print("AAHHH NO AQMES PLATE", b["start"])
                         continue
                     slot_priorities = self.prioritize(aqmes_plates)
 
@@ -558,7 +560,7 @@ class Scheduler(object):
 
                     b["plateid"] = aqmes_plates[sorted_priorities[i]]["PLATE_ID"]
 
-        return bright_starts, dark_starts
+        return bright_starts, dark_starts, night_sched
 
 
 def isWithinSlot(starts, mjd, delta):
