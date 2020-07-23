@@ -419,7 +419,7 @@ class Scheduler(object):
                                           "length": 50,
                                           "plateid": None
                         })
-                    now = night_sched["start"] + 50 / 60 / 24
+                    now += 50 / 60 / 24
 
                 # strip overhead appropriately
                 # except petunia doesn't care about overhead... leave it alone for now
@@ -531,7 +531,7 @@ class Scheduler(object):
                                           "length": 80,
                                           "plateid": None
                         })
-                    now = now + 80 / 60 / 24
+                    now += 80 / 60 / 24
 
                 # strip overhead appropriately
                 # except petunia doesn't care about overhead... leave it alone for now
@@ -556,6 +556,13 @@ class Scheduler(object):
                     i = 0
                     while aqmes_plates[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
                         i += 1
+                        if i >= len(sorted_priorities) - 1:
+                            # g-e for case of len(sorted_priorities) == 1
+                            i = -1
+                            break
+                    if i == -1:
+                        continue
+                        print("AAHHH NO unique AQMES PLATE", b["start"])
                     tonight_ids.append(aqmes_plates[sorted_priorities[i]]["PLATE_ID"])
 
                     b["plateid"] = aqmes_plates[sorted_priorities[i]]["PLATE_ID"]
