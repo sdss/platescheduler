@@ -346,13 +346,22 @@ class Scheduler(object):
                     if len(b_long_obs) == 0:
                         continue
                     slot_priorities = self.prioritize(b_long_obs)
-                    highest = np.argmax(slot_priorities)
-                    priorities.append(slot_priorities[highest])
-                    plate_ids.append(b_long_obs[highest]["PLATE_ID"])
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    i = 0
+                    while b_long_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
+                        i += 1
+                        if i == len(sorted_priorities) - 1:
+                            i = -1
+                            break
+                    if i == -1:
+                        continue
+                    priorities.append(slot_priorities[sorted_priorities[i]])
+                    plate_ids.append(b_long_obs[sorted_priorities[i]]["PLATE_ID"])
 
                 # sort fields into descending priority order
                 # track index of each, so we can use plate_ids and long_slots
                 priority_order = np.argsort(priorities)[::-1]
+
 
                 long_starts = list()
                 long_plates = list()
@@ -364,9 +373,10 @@ class Scheduler(object):
                     idx = priority_order[i]
                     long_starts.append(long_slots[idx])
                     long_plates.append(plate_ids[idx])
+
                     i += 1
                 
-                begin_night = isWithinSlot(long_starts, night_sched["bright_start"], 20 / 60 / 24)
+                begin_night = isWithinSlot(long_starts, night_sched["bright_start"], 20)
 
                 now = night_sched["bright_start"]
 
@@ -378,7 +388,7 @@ class Scheduler(object):
                     now += 87 / 60 / 24
 
                 while len(bright_starts) < (len(gg_len) + len(long_bright)):
-                    long_check = isWithinSlot(long_starts, now, 50)
+                    long_check = isWithinSlot(long_starts, now, 30)
 
                     if long_check is not None:
                         bright_starts.append({"start": now,
@@ -419,13 +429,23 @@ class Scheduler(object):
 
             w_gg = np.where([c == "GG" for c in self.plates["CADENCE"]])
 
+            tonight_ids = list()
             for b in bright_starts:
                 # now fill in GG plates as needed
                 if b["plateid"] is None:
                     gg_obs = self.observable(self.plates[w_gg], mjd=b["start"], check_cadence=True)
+                    if len(gg_obs) == 0:
+                        print("AAHH, NO GG PLATE", b["start"])
+                        continue
                     slot_priorities = self.prioritize(gg_obs)
-                    highest = np.argmax(slot_priorities)
-                    b["plateid"] = gg_obs[highest]["PLATE_ID"]
+
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    i = 0
+                    while gg_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
+                        i += 1
+                    tonight_ids.append(gg_obs[sorted_priorities[i]]["PLATE_ID"])
+
+                    b["plateid"] = gg_obs[sorted_priorities[i]]["PLATE_ID"]
 
         if night_sched["dark_start"] > 0:
             self.last_full_moon(mjd)
@@ -440,9 +460,17 @@ class Scheduler(object):
                     if len(rm_obs) == 0:
                         continue
                     slot_priorities = self.prioritize(rm_obs)
-                    highest = np.argmax(slot_priorities)
-                    priorities.append(slot_priorities[highest])
-                    plate_ids.append(rm_obs[highest]["PLATE_ID"])
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    i = 0
+                    while rm_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
+                        i += 1
+                        if i == len(sorted_priorities) - 1:
+                            i = -1
+                            break
+                    if i == -1:
+                        continue
+                    priorities.append(slot_priorities[sorted_priorities[i]])
+                    plate_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
 
                 # sort fields into descending priority order
                 # track index of each, so we can use plate_ids and long_slots
@@ -460,7 +488,7 @@ class Scheduler(object):
                     rm_plates.append(plate_ids[idx])
                     i += 1
                 
-                begin_night = isWithinSlot(rm_starts, night_sched["dark_start"], 60 / 60 / 24)
+                begin_night = isWithinSlot(rm_starts, night_sched["dark_start"], 60)
 
                 now = night_sched["dark_start"]
 
@@ -514,23 +542,28 @@ class Scheduler(object):
 
             w_aqmes = np.where(["AQMES" in c for c in self.plates["CADENCE"]])
 
+            tonight_ids = list()
             for b in dark_starts:
                 if b["plateid"] is None:
                     aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True)
                     if len(aqmes_plates) == 0:
                         continue
                     slot_priorities = self.prioritize(aqmes_plates)
-                    highest = np.argmax(slot_priorities)
-                    b["plateid"] = aqmes_plates[highest]["PLATE_ID"]
+
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    i = 0
+                    while aqmes_plates[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
+                        i += 1
+                    tonight_ids.append(aqmes_plates[sorted_priorities[i]]["PLATE_ID"])
+
+                    b["plateid"] = aqmes_plates[sorted_priorities[i]]["PLATE_ID"]
 
         return bright_starts, dark_starts
-
-    # don't forget to match plates at different hour angles
 
 
 def isWithinSlot(starts, mjd, delta):
 
-    w_within = np.where(np.abs(np.array(starts) - mjd) < delta)
+    w_within = np.where(np.abs(np.array(starts) - mjd) < delta / 60 / 24)
 
     if len(w_within[0]) == 0:
         return None
