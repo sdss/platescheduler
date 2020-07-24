@@ -136,17 +136,18 @@ class Scheduler(object):
         window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
 
         in_window = [True for p in plates]
+        
+        for i, p in enumerate(plates):
+            start = (p["RA"] + p["HA_MIN"]) / 15. % 24
+            end = (p["RA"] + p["HA_MAX"]) / 15. % 24
+            start_diff = float(lstDiff(start, window_lst_start))
+            end_diff = float(lstDiff(end, window_lst_end))
 
-        for p, w in zip(plates, in_window):
-            start = (p["RA"] + p["HA_MAX"]) / 15.
-            end = (p["RA"] + p["HA_MIN"]) / 15.
-            start_diff = lstDiff(start, window_lst_start)
-            end_diff = lstDiff(end, window_lst_end)
-            if start_diff > 0:
+            if start_diff < 0:
                 # start is less than window start
-                w = False
-            elif end_diff < 0:
-                w = False
+                in_window[i] = False
+            elif end_diff > 0:
+                in_window[i] = False
 
         moonra, moondec = self.Observer.moon_radec(mjd)
 
@@ -342,8 +343,9 @@ class Scheduler(object):
                 long_slots = np.arange(night_sched["bright_start"], night_sched["bright_end"], 50 / 60 / 24)
                 priorities = list()
                 plate_ids = list()
+                starts = list()
                 for l in long_slots:
-                    b_long_obs = self.observable(self.plates[w_bright_long], mjd=l, check_cadence=True)
+                    b_long_obs = self.observable(self.plates[w_bright_long], mjd=l, check_cadence=True, duration=67.)
                     if len(b_long_obs) == 0:
                         continue
                     slot_priorities = self.prioritize(b_long_obs)
@@ -351,16 +353,17 @@ class Scheduler(object):
                     i = 0
                     while b_long_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
                         i += 1
-                        if i == len(sorted_priorities) - 1:
+                        if i >= len(sorted_priorities) - 1:
                             i = -1
                             break
                     if i == -1:
                         continue
                     priorities.append(slot_priorities[sorted_priorities[i]])
                     plate_ids.append(b_long_obs[sorted_priorities[i]]["PLATE_ID"])
+                    starts.append(l)
 
                 # sort fields into descending priority order
-                # track index of each, so we can use plate_ids and long_slots
+                # track index of each, so we can use plate_ids and starts
                 priority_order = np.argsort(priorities)[::-1]
 
 
@@ -371,8 +374,9 @@ class Scheduler(object):
                     if i >= len(priority_order):
                         long_starts.append(-1)
                         long_plates.append(-1)
+                        continue
                     idx = priority_order[i]
-                    long_starts.append(long_slots[idx])
+                    long_starts.append(starts[idx])
                     long_plates.append(plate_ids[idx])
 
                     i += 1
@@ -434,9 +438,9 @@ class Scheduler(object):
             for b in bright_starts:
                 # now fill in GG plates as needed
                 if b["plateid"] is None:
-                    gg_obs = self.observable(self.plates[w_gg], mjd=b["start"], check_cadence=True)
+                    gg_obs = self.observable(self.plates[w_gg], mjd=b["start"], check_cadence=True, duration=30.)
                     if len(gg_obs) == 0:
-                        print("AAHH, NO GG PLATE", b["start"])
+                        # print("AAHH, NO GG PLATE", b["start"])
                         continue
                     slot_priorities = self.prioritize(gg_obs)
 
@@ -444,6 +448,13 @@ class Scheduler(object):
                     i = 0
                     while gg_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
                         i += 1
+                        if i >= len(sorted_priorities) - 1:
+                            # g-e for case of len(sorted_priorities) == 1
+                            i = -1
+                            break
+                    if i == -1:
+                        # print("AAHHH NO unique GG PLATE", b["start"])
+                        continue
                     tonight_ids.append(gg_obs[sorted_priorities[i]]["PLATE_ID"])
 
                     b["plateid"] = gg_obs[sorted_priorities[i]]["PLATE_ID"]
@@ -456,8 +467,9 @@ class Scheduler(object):
                 rm_slots = np.arange(night_sched["dark_start"], night_sched["dark_end"], 80 / 60 / 24)
                 priorities = list()
                 plate_ids = list()
+                starts = list()
                 for l in rm_slots:
-                    rm_obs = self.observable(self.plates[w_rm], mjd=l, check_cadence=True)
+                    rm_obs = self.observable(self.plates[w_rm], mjd=l, check_cadence=True, duration=60.)
                     if len(rm_obs) == 0:
                         continue
                     slot_priorities = self.prioritize(rm_obs)
@@ -465,13 +477,14 @@ class Scheduler(object):
                     i = 0
                     while rm_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
                         i += 1
-                        if i == len(sorted_priorities) - 1:
+                        if i >= len(sorted_priorities) - 1:
                             i = -1
                             break
                     if i == -1:
                         continue
                     priorities.append(slot_priorities[sorted_priorities[i]])
                     plate_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
+                    starts.append(l)
 
                 # sort fields into descending priority order
                 # track index of each, so we can use plate_ids and long_slots
@@ -484,12 +497,13 @@ class Scheduler(object):
                     if i >= len(priority_order):
                         rm_starts.append(-1)
                         rm_plates.append(-1)
+                        continue
                     idx = priority_order[i]
-                    rm_starts.append(rm_slots[idx])
+                    rm_starts.append(starts[idx])
                     rm_plates.append(plate_ids[idx])
                     i += 1
                 
-                begin_night = isWithinSlot(rm_starts, night_sched["dark_start"], 60)
+                begin_night = isWithinSlot(rm_starts, night_sched["dark_start"], 30)
 
                 now = night_sched["dark_start"]
 
@@ -501,7 +515,7 @@ class Scheduler(object):
                     now += 120 / 60 / 24
 
                 while len(dark_starts) < (len(dark_lengths) + len(rm_lengths)):
-                    long_check = isWithinSlot(rm_starts, now, 50)
+                    long_check = isWithinSlot(rm_starts, now, 30)
 
                     if long_check is not None:
                         dark_starts.append({"start": now,
@@ -546,9 +560,9 @@ class Scheduler(object):
             tonight_ids = list()
             for b in dark_starts:
                 if b["plateid"] is None:
-                    aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True)
+                    aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True, duration=60.)
                     if len(aqmes_plates) == 0:
-                        print("AAHHH NO AQMES PLATE", b["start"])
+                        # print("AAHHH NO AQMES PLATE", b["start"])
                         continue
                     slot_priorities = self.prioritize(aqmes_plates)
 
@@ -561,8 +575,8 @@ class Scheduler(object):
                             i = -1
                             break
                     if i == -1:
+                        # print("AAHHH NO unique AQMES PLATE", b["start"])
                         continue
-                        print("AAHHH NO unique AQMES PLATE", b["start"])
                     tonight_ids.append(aqmes_plates[sorted_priorities[i]]["PLATE_ID"])
 
                     b["plateid"] = aqmes_plates[sorted_priorities[i]]["PLATE_ID"]
