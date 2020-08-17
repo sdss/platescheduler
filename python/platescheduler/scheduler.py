@@ -136,12 +136,31 @@ class Scheduler(object):
         window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
 
         in_window = [True for p in plates]
-        
+
+        # debug = len(plates) < 4 and int(mjd) in [59146, 59147]
+        debug = False
+
+        if debug:
+            print(window_lst_start, window_lst_end)
+
         for i, p in enumerate(plates):
-            start = (p["RA"] + p["HA_MIN"]) / 15. % 24
-            end = (p["RA"] + p["HA_MAX"]) / 15. % 24
+            if debug:
+                print(p["RA"], p["HA_MIN"], p["HA_MAX"])
+            start = (p["RA"] + p["HA_MIN"]) / 15.
+            if start < 0:
+                start += 24
+            elif start > 24:
+                start -= 24
+            end = (p["RA"] + p["HA_MAX"]) / 15.
+            if end < 0:
+                end += 24
+            elif end > 24:
+                end -= 24
             start_diff = float(lstDiff(start, window_lst_start))
             end_diff = float(lstDiff(end, window_lst_end))
+
+            if debug:
+                print(f"{start:.2f} {start_diff:.2f} {end:.2f} {end_diff:.2f}")
 
             if start_diff < 0:
                 # start is less than window start
@@ -164,12 +183,18 @@ class Scheduler(object):
         observable = (moon_dist > self.moon_threshold) & in_window\
                      & (skybrightness <= plates["SKYBRIGHTNESS"])
 
+        if debug:
+            print("B  ", plates["PLATE_ID"], observable)
+
         if(check_cadence):
             for i, p in enumerate(plates):
                 if observable[i] and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
                     observable[i] = self.cadences[cad](mjd, hist=self.obs_hist[field], last_full_moon=self._last_full_moon)
+
+        if debug:
+            print("A  ", plates["PLATE_ID"], observable)
 
         return plates[observable]
 
@@ -352,94 +377,13 @@ class Scheduler(object):
             w_bright_long = np.where([c in self.bright_cadences for c in \
                                       self.plates["CADENCE"]])
             gg_sched = 0
-            long_starts = list()
-            long_plates = list()
-            if len(long_bright) > 0:
-                # find highest priority long slots and assign them
-
-                long_slots = np.arange(night_sched["bright_start"],
-                                       night_sched["bright_end"],
-                                       20 / 60 / 24)
-                priorities = list()
-                plate_ids = list()
-                starts = list()
-                for l in long_slots:
-                    b_long_obs = self.observable(self.plates[w_bright_long], mjd=l, check_cadence=True, duration=67.)
-                    if len(b_long_obs) == 0:
-                        continue
-                    slot_priorities = self.prioritize(b_long_obs)
-                    sorted_priorities = np.argsort(slot_priorities)[::-1]
-                    i = 0
-                    while b_long_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
-                        i += 1
-                        if i >= len(sorted_priorities) - 1:
-                            i = -1
-                            break
-                    if i == -1:
-                        continue
-                    priorities.append(slot_priorities[sorted_priorities[i]])
-                    plate_ids.append(b_long_obs[sorted_priorities[i]]["PLATE_ID"])
-                    starts.append(l)
-
-                # sort fields into descending priority order
-                # track index of each, so we can use plate_ids and starts
-                priority_order = np.argsort(priorities)[::-1]
-
-                i = 0  # for iterating in while loop
-                while len(long_starts) < len(long_bright):
-                    if i >= len(priority_order):
-                        long_starts.append(-1)
-                        long_plates.append(-1)
-                        continue
-
-                    idx = priority_order[i]
-
-                    if len(long_starts) > 0:
-                        # first one is a surething, there's nothing to check
-                        diffs = np.abs(starts[idx]-np.array(long_starts))
-                        if np.min(diffs) < 80 / 60 / 24:
-                            # basically check if it's too close to a higher priority long slot
-                            i += 1
-                            continue
-
-                    long_starts.append(starts[idx])
-                    long_plates.append(plate_ids[idx])
-
-                    i += 1
-                # sorted_starts = sorted(long_starts)
-                # test_slots = [sorted_starts[i+1] - sorted_starts[i] for i in range(len(sorted_starts)-1)]
-                # print(mjd, [f"{t%1:.4f}" for t in sorted_starts])
-                # print(mjd, [f"{t*60*24:4.1f}" for t in test_slots])
-
-            begin_night = isWithinSlot(long_starts, night_sched["bright_start"], 20)
 
             now = night_sched["bright_start"]
-
-            if begin_night is not None:
-                bright_starts.append({"start": night_sched["bright_start"],
-                                      "length": 87,
-                                      "plateid": long_plates[begin_night]
-                    })
-                now += 87 / 60 / 24
 
             while len(bright_starts) < (len(gg_len) + len(long_bright)):
                 if now + 15 / 60 / 24 >= night_sched["bright_end"]:
                     break
-                long_check = isWithinSlot(long_starts, now, 30)
-                if long_check is None:
-                    # this is a test. some plates need it, which may mean
-                    # I messed up somewhere above :/
-                    long_check = isWithinSlot(long_starts, now, 40)
 
-                if long_check is not None:
-                    bright_starts.append({"start": now,
-                                          "length": 87,
-                                          "plateid": long_plates[long_check]
-                        })
-                    now += 87 / 60 / 24
-                    continue
-
-                # otherwise lets try to do a gg plate
                 if gg_sched < len(gg_len):
                     gg_obs = self.observable(self.plates[w_gg], mjd=now,
                                              check_cadence=True, duration=30.)
@@ -513,125 +457,79 @@ class Scheduler(object):
 
         if night_sched["dark_start"] > 0:
             self.last_full_moon(mjd)
-            if len(rm_lengths) > 0:
-                w_rm = np.where([c == "RM" for c in self.plates["CADENCE"]])
-                
-                rm_slots = np.arange(night_sched["dark_start"], night_sched["dark_end"], 80 / 60 / 24)
-                priorities = list()
-                plate_ids = list()
-                starts = list()
-                for l in rm_slots:
-                    rm_obs = self.observable(self.plates[w_rm], mjd=l, check_cadence=True, duration=60.)
-                    if len(rm_obs) == 0:
-                        continue
-                    slot_priorities = self.prioritize(rm_obs)
-                    sorted_priorities = np.argsort(slot_priorities)[::-1]
-                    i = 0
-                    while rm_obs[sorted_priorities[i]]["PLATE_ID"] in plate_ids:
-                        i += 1
-                        if i >= len(sorted_priorities) - 1:
-                            i = -1
-                            break
-                    if i == -1:
-                        continue
-                    priorities.append(slot_priorities[sorted_priorities[i]])
-                    plate_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
-                    starts.append(l)
-
-                # sort fields into descending priority order
-                # track index of each, so we can use plate_ids and long_slots
-                priority_order = np.argsort(priorities)[::-1]
-
-                rm_starts = list()
-                rm_plates = list()
-                i = 0  # for iterating in while loop
-                while len(rm_starts) < len(rm_lengths):
-                    if i >= len(priority_order):
-                        rm_starts.append(-1)
-                        rm_plates.append(-1)
-                        continue
-                    idx = priority_order[i]
-                    rm_starts.append(starts[idx])
-                    rm_plates.append(plate_ids[idx])
-                    i += 1
-                
-                begin_night = isWithinSlot(rm_starts, night_sched["dark_start"], 30)
-
-                now = night_sched["dark_start"]
-
-                if begin_night is not None:
-                    dark_starts.append({"start": night_sched["dark_start"],
-                                          "length": 120,
-                                          "plateid": rm_plates[begin_night]
-                        })
-                    now += 120 / 60 / 24
-
-                while len(dark_starts) < (len(dark_lengths) + len(rm_lengths)):
-                    long_check = isWithinSlot(rm_starts, now, 30)
-
-                    if long_check is not None:
-                        dark_starts.append({"start": now,
-                                              "length": 120,
-                                              "plateid": rm_plates[long_check]
-                            })
-                        now += 120 / 60 / 24
-                    else:
-                        dark_starts.append({"start": now,
-                                              "length": 80,
-                                              "plateid": None
-                            })
-                        now += 80 / 60 / 24
-                
-                # strip overhead appropriately
-                # except petunia doesn't care about overhead... leave it alone for now
-
-                # if night_sched["dark_start"] == night_sched["start"]:
-                #     bright_starts[0]["length"] -= 20
-                # if night_sched["dark_end"] == night_sched["end"]:
-                #     bright_starts[-1]["length"] -= 20
-
-            else:
-                now = night_sched["dark_start"]
-                while len(dark_starts) < len(dark_lengths):
-                    dark_starts.append({"start": now,
-                                          "length": 80,
-                                          "plateid": None
-                        })
-                    now += 80 / 60 / 24
-
-                # strip overhead appropriately
-                # except petunia doesn't care about overhead... leave it alone for now
-
-                # if night_sched["dark_start"] == night_sched["start"]:
-                #     bright_starts[0]["length"] -= 20
-                # if night_sched["dark_end"] == night_sched["end"]:
-                #     bright_starts[-1]["length"] -= 20
-
+            w_rm = np.where([c == "RM" for c in self.plates["CADENCE"]])
             w_aqmes = np.where(["AQMES" in c for c in self.plates["CADENCE"]])
 
-            tonight_ids = list()
-            for b in dark_starts:
-                if b["plateid"] is None:
-                    aqmes_plates = self.observable(self.plates[w_aqmes], mjd=b["start"], check_cadence=True, duration=60.)
-                    if len(aqmes_plates) == 0:
-                        # print("AAHHH NO AQMES PLATE", b["start"])
-                        continue
-                    slot_priorities = self.prioritize(aqmes_plates)
+            now = night_sched["dark_start"]
+
+            rm_sched = 0
+
+            while len(dark_starts) < (len(rm_lengths) + len(dark_lengths)):
+                if now + 15 / 60 / 24 >= night_sched["dark_end"]:
+                    break
+
+                if rm_sched < len(rm_lengths):
+                    rm_obs = self.observable(self.plates[w_rm], mjd=now,
+                                             check_cadence=True, duration=60.)
+                else:
+                    rm_obs = []
+                rm_this = False
+                if len(rm_obs) > 0:
+                    slot_priorities = self.prioritize(rm_obs)
 
                     sorted_priorities = np.argsort(slot_priorities)[::-1]
                     i = 0
-                    while aqmes_plates[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
-                        i += 1
-                        if i >= len(sorted_priorities) - 1:
-                            # g-e for case of len(sorted_priorities) == 1
-                            i = -1
-                            break
-                    if i == -1:
-                        # print("AAHHH NO unique AQMES PLATE", b["start"])
-                        continue
-                    tonight_ids.append(aqmes_plates[sorted_priorities[i]]["PLATE_ID"])
+                    if len(sorted_priorities) > 0:
+                        while rm_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
+                            i += 1
+                            if i >= len(sorted_priorities) - 1:
+                                # g-e for case of len(sorted_priorities) == 1
+                                i = -1
+                                break
+                        if i != -1:
+                            tonight_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
 
-                    b["plateid"] = aqmes_plates[sorted_priorities[i]]["PLATE_ID"]
+                            dark_starts.append({"start": now,
+                                                  "length": 120,
+                                                  "plateid": rm_obs[sorted_priorities[i]]["PLATE_ID"]
+                                })
+                            now += 120 / 60 / 24
+                            rm_sched += 1
+                            rm_this = True
+                if not rm_this:
+                    aqmes_obs = self.observable(self.plates[w_aqmes], mjd=now,
+                                         check_cadence=True, duration=30.)
+                    slot_priorities = self.prioritize(aqmes_obs)
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    i = 0
+                    if len(sorted_priorities) > 0:
+                        while aqmes_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
+                            i += 1
+                            if i >= len(sorted_priorities) - 1:
+                                # g-e for case of len(sorted_priorities) == 1
+                                i = -1
+                                break
+                        if i == -1:
+                            dark_starts.append({"start": now,
+                                                  "length": 87,
+                                                  "plateid": None
+                            })
+                            now += 87 / 60 / 24
+                        else:
+                            tonight_ids.append(aqmes_obs[sorted_priorities[i]]["PLATE_ID"])
+
+                            dark_starts.append({"start": now,
+                                                  "length": 87,
+                                                  "plateid": aqmes_obs[sorted_priorities[i]]["PLATE_ID"]
+                                })
+                            now += 87 / 60 / 24
+                    else:
+                        # everything else failed
+                        dark_starts.append({"start": now,
+                                              "length": 87,
+                                              "plateid": None
+                        })
+                        now += 87 / 60 / 24
 
         return bright_starts, dark_starts, night_sched
 
