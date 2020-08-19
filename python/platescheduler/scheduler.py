@@ -79,15 +79,15 @@ class Scheduler(object):
         """
 
         self._carts = {
-            1: "BOTH",
-            2: "BOTH",
-            3: "BOTH",
-            4: "BOTH",
-            5: "BOSS",
-            6: "BOTH",
-            7: "BOTH",
-            8: "BOTH",
-            9: "BOTH",
+            1: {"type": "BOTH", "plateid": 0},
+            2: {"type": "BOTH", "plateid": 0},
+            3: {"type": "BOTH", "plateid": 0},
+            4: {"type": "BOTH", "plateid": 0},
+            5: {"type": "BOSS", "plateid": 0},
+            6: {"type": "BOTH", "plateid": 0},
+            7: {"type": "BOTH", "plateid": 0},
+            8: {"type": "BOTH", "plateid": 0},
+            9: {"type": "BOTH", "plateid": 0},
         }
 
 
@@ -96,6 +96,44 @@ class Scheduler(object):
         if self._carts is None:
             self.pullCarts()
         return self._carts
+
+
+    def assignCarts(self, bright_starts, dark_starts):
+        """
+        """
+
+        plugged = {v["plateid"]: k for k, v in self.carts.items()}
+
+        available = {k: v["type"] for k, v in self.carts.items()} # definitely want a copy
+
+        for s in bright_starts:
+            if s["cart"] is None:
+                if s["plateid"] in plugged:
+                    s["cart"] = plugged[s["plateid"]]
+                    del available[plugged[s["plateid"]]]
+
+        for s in dark_starts:
+            if s["cart"] is None:
+                if s["plateid"] in plugged:
+                    s["cart"] = plugged[s["plateid"]]
+                    del available[plugged[s["plateid"]]]
+
+        for s in dark_starts:
+            if s["cart"] is None:
+                for k, v in available.items():
+                    if v in ["BOTH", "BOSS"]:
+                        s["cart"] = k
+                        del available[k]
+                        break
+
+        for s in bright_starts:
+            if s["cart"] is None:
+                for k, v in available.items():
+                    if v in ["BOTH", "APOGEE"]:
+                        s["cart"] = k
+                        del available[k]
+                        break
+
 
 
     def _inverseMoon(self, mjd):
@@ -366,6 +404,9 @@ class Scheduler(object):
     def scheduleMjd(self, mjd):
         """Run the scheduling
         """
+
+        self.pullCarts()
+
         night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste = \
                                                           self.makeSlots(mjd)
 
@@ -407,7 +448,8 @@ class Scheduler(object):
 
                             bright_starts.append({"start": now,
                                                   "length": 50,
-                                                  "plateid": gg_obs[sorted_priorities[i]]["PLATE_ID"]
+                                                  "plateid": gg_obs[sorted_priorities[i]]["PLATE_ID"],
+                                                  "cart": None
                                 })
                             now += 50 / 60 / 24
                             gg_sched += 1
@@ -429,7 +471,8 @@ class Scheduler(object):
                         if i == -1:
                             bright_starts.append({"start": now,
                                                   "length": 50,
-                                                  "plateid": None
+                                                  "plateid": None,
+                                                  "cart": -1
                             })
                             now += 50 / 60 / 24
                         else:
@@ -437,14 +480,16 @@ class Scheduler(object):
 
                             bright_starts.append({"start": now,
                                                   "length": 87,
-                                                  "plateid": long_obs[sorted_priorities[i]]["PLATE_ID"]
+                                                  "plateid": long_obs[sorted_priorities[i]]["PLATE_ID"],
+                                                  "cart": None
                                 })
                             now += 87 / 60 / 24
                     else:
                         # everything else failed
                         bright_starts.append({"start": now,
                                               "length": 50,
-                                              "plateid": None
+                                              "plateid": None,
+                                                  "cart": -1
                         })
                         now += 50 / 60 / 24
 
@@ -491,7 +536,8 @@ class Scheduler(object):
 
                             dark_starts.append({"start": now,
                                                   "length": 120,
-                                                  "plateid": rm_obs[sorted_priorities[i]]["PLATE_ID"]
+                                                  "plateid": rm_obs[sorted_priorities[i]]["PLATE_ID"],
+                                                  "cart": None
                                 })
                             now += 120 / 60 / 24
                             rm_sched += 1
@@ -512,7 +558,8 @@ class Scheduler(object):
                         if i == -1:
                             dark_starts.append({"start": now,
                                                   "length": 87,
-                                                  "plateid": None
+                                                  "plateid": None,
+                                                  "cart": -1
                             })
                             now += 87 / 60 / 24
                         else:
@@ -520,16 +567,20 @@ class Scheduler(object):
 
                             dark_starts.append({"start": now,
                                                   "length": 87,
-                                                  "plateid": aqmes_obs[sorted_priorities[i]]["PLATE_ID"]
+                                                  "plateid": aqmes_obs[sorted_priorities[i]]["PLATE_ID"],
+                                                  "cart": None
                                 })
                             now += 87 / 60 / 24
                     else:
                         # everything else failed
                         dark_starts.append({"start": now,
                                               "length": 87,
-                                              "plateid": None
+                                              "plateid": None,
+                                                  "cart": -1
                         })
                         now += 87 / 60 / 24
+
+        self.assignCarts(bright_starts, dark_starts)
 
         return bright_starts, dark_starts, night_sched
 
