@@ -1,10 +1,11 @@
 # encoding: utf-8
 
+from __future__ import print_function, division, absolute_import
 import numpy as np
 import scipy.optimize as optimize
 import fitsio
 
-from roboscheduler.scheduler import Observer
+from .roboscheduler import Observer
 from .cadence import assignCadence
 
 
@@ -79,15 +80,15 @@ class Scheduler(object):
         """
 
         self._carts = {
-            1: {"type": "BOTH", "plateid": 0},
-            2: {"type": "BOTH", "plateid": 0},
-            3: {"type": "BOTH", "plateid": 0},
-            4: {"type": "BOTH", "plateid": 0},
-            5: {"type": "BOSS", "plateid": 0},
-            6: {"type": "BOTH", "plateid": 0},
-            7: {"type": "BOTH", "plateid": 0},
-            8: {"type": "BOTH", "plateid": 0},
-            9: {"type": "BOTH", "plateid": 0},
+            1: {"type": "BOTH", "plate": 0},
+            2: {"type": "BOTH", "plate": 0},
+            3: {"type": "BOTH", "plate": 0},
+            4: {"type": "BOTH", "plate": 0},
+            5: {"type": "BOSS", "plate": 0},
+            6: {"type": "BOTH", "plate": 0},
+            7: {"type": "BOTH", "plate": 0},
+            8: {"type": "BOTH", "plate": 0},
+            9: {"type": "BOTH", "plate": 0},
         }
 
 
@@ -102,21 +103,21 @@ class Scheduler(object):
         """
         """
 
-        plugged = {v["plateid"]: k for k, v in self.carts.items()}
+        plugged = {v["plate"]: k for k, v in self.carts.items()}
 
         available = {k: v["type"] for k, v in self.carts.items()} # definitely want a copy
 
         for s in bright_starts:
             if s["cart"] is None:
-                if s["plateid"] in plugged:
-                    s["cart"] = plugged[s["plateid"]]
-                    del available[plugged[s["plateid"]]]
+                if s["plate"] in plugged:
+                    s["cart"] = plugged[s["plate"]]
+                    del available[plugged[s["plate"]]]
 
         for s in dark_starts:
             if s["cart"] is None:
-                if s["plateid"] in plugged:
-                    s["cart"] = plugged[s["plateid"]]
-                    del available[plugged[s["plateid"]]]
+                if s["plate"] in plugged:
+                    s["cart"] = plugged[s["plate"]]
+                    del available[plugged[s["plate"]]]
 
         for s in dark_starts:
             if s["cart"] is None:
@@ -141,6 +142,7 @@ class Scheduler(object):
 
 
     def last_full_moon(self, mjd):
+        mjd = np.array([mjd])
         d_moon_dt = optimize.approx_fprime(mjd, self.Observer.moon_illumination, 0.5)
 
         if d_moon_dt > 0:
@@ -175,15 +177,7 @@ class Scheduler(object):
 
         in_window = [True for p in plates]
 
-        # debug = len(plates) < 4 and int(mjd) in [59146, 59147]
-        debug = False
-
-        if debug:
-            print(window_lst_start, window_lst_end)
-
         for i, p in enumerate(plates):
-            if debug:
-                print(p["RA"], p["HA_MIN"], p["HA_MAX"])
             start = (p["RA"] + p["HA_MIN"]) / 15.
             if start < 0:
                 start += 24
@@ -196,9 +190,6 @@ class Scheduler(object):
                 end -= 24
             start_diff = float(lstDiff(start, window_lst_start))
             end_diff = float(lstDiff(end, window_lst_end))
-
-            if debug:
-                print(f"{start:.2f} {start_diff:.2f} {end:.2f} {end_diff:.2f}")
 
             if start_diff < 0:
                 # start is less than window start
@@ -221,18 +212,12 @@ class Scheduler(object):
         observable = (moon_dist > self.moon_threshold) & in_window\
                      & (skybrightness <= plates["SKYBRIGHTNESS"])
 
-        if debug:
-            print("B  ", plates["PLATE_ID"], observable)
-
         if(check_cadence):
             for i, p in enumerate(plates):
                 if observable[i] and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
                     observable[i] = self.cadences[cad](mjd, hist=self.obs_hist[field], last_full_moon=self._last_full_moon)
-
-        if debug:
-            print("A  ", plates["PLATE_ID"], observable)
 
         return plates[observable]
 
@@ -301,6 +286,7 @@ class Scheduler(object):
             if extra >= 67 / 60 / 24:
                 # we can ignore a second overhead on a full darknight
                 dark_slots += 1
+                bright_slots = 0
             elif extra >= 30 / 60 / 24:
                 # ignore the overhead and add a GG plate
                 bright_slots = 1
@@ -446,9 +432,9 @@ class Scheduler(object):
                         if i != -1:
                             tonight_ids.append(gg_obs[sorted_priorities[i]]["PLATE_ID"])
 
-                            bright_starts.append({"start": now,
-                                                  "length": 50,
-                                                  "plateid": gg_obs[sorted_priorities[i]]["PLATE_ID"],
+                            bright_starts.append({"obsmjd": now,
+                                                  "exposure_length": 50,
+                                                  "plate": gg_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
                             now += 50 / 60 / 24
@@ -469,36 +455,36 @@ class Scheduler(object):
                                 i = -1
                                 break
                         if i == -1:
-                            bright_starts.append({"start": now,
-                                                  "length": 50,
-                                                  "plateid": None,
+                            bright_starts.append({"obsmjd": now,
+                                                  "exposure_length": 50,
+                                                  "plate": None,
                                                   "cart": -1
                             })
                             now += 50 / 60 / 24
                         else:
                             tonight_ids.append(long_obs[sorted_priorities[i]]["PLATE_ID"])
 
-                            bright_starts.append({"start": now,
-                                                  "length": 87,
-                                                  "plateid": long_obs[sorted_priorities[i]]["PLATE_ID"],
+                            bright_starts.append({"obsmjd": now,
+                                                  "exposure_length": 87,
+                                                  "plate": long_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
                             now += 87 / 60 / 24
                     else:
                         # everything else failed
-                        bright_starts.append({"start": now,
-                                              "length": 50,
-                                              "plateid": None,
+                        bright_starts.append({"obsmjd": now,
+                                              "exposure_length": 50,
+                                              "plate": None,
                                                   "cart": -1
                         })
                         now += 50 / 60 / 24
 
                 # strip overhead appropriately
                 # except petunia doesn't care about overhead... leave it alone for now
-                # if night_sched["bright_start"] == night_sched["start"]:
-                #     bright_starts[0]["length"] -= 20
+                # if night_sched["bright_start"] == night_sched["obsmjd"]:
+                #     bright_starts[0]["exposure_length"] -= 20
                 # if night_sched["bright_end"] == night_sched["end"]:
-                #     bright_starts[-1]["length"] -= 20
+                #     bright_starts[-1]["exposure_length"] -= 20
 
         if night_sched["dark_start"] > 0:
             self.last_full_moon(mjd)
@@ -534,9 +520,9 @@ class Scheduler(object):
                         if i != -1:
                             tonight_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
 
-                            dark_starts.append({"start": now,
-                                                  "length": 120,
-                                                  "plateid": rm_obs[sorted_priorities[i]]["PLATE_ID"],
+                            dark_starts.append({"obsmjd": now,
+                                                  "exposure_length": 120,
+                                                  "plate": rm_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
                             now += 120 / 60 / 24
@@ -556,27 +542,27 @@ class Scheduler(object):
                                 i = -1
                                 break
                         if i == -1:
-                            dark_starts.append({"start": now,
-                                                  "length": 87,
-                                                  "plateid": None,
+                            dark_starts.append({"obsmjd": now,
+                                                  "exposure_length": 87,
+                                                  "plate": None,
                                                   "cart": -1
                             })
                             now += 87 / 60 / 24
                         else:
                             tonight_ids.append(aqmes_obs[sorted_priorities[i]]["PLATE_ID"])
 
-                            dark_starts.append({"start": now,
-                                                  "length": 87,
-                                                  "plateid": aqmes_obs[sorted_priorities[i]]["PLATE_ID"],
+                            dark_starts.append({"obsmjd": now,
+                                                  "exposure_length": 87,
+                                                  "plate": aqmes_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
                             now += 87 / 60 / 24
                     else:
                         # everything else failed
-                        dark_starts.append({"start": now,
-                                              "length": 87,
-                                              "plateid": None,
-                                                  "cart": -1
+                        dark_starts.append({"obsmjd": now,
+                                              "exposure_length": 87,
+                                              "plate": None,
+                                              "cart": -1
                         })
                         now += 87 / 60 / 24
 
