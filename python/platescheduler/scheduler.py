@@ -1,12 +1,121 @@
 # encoding: utf-8
 
 from __future__ import print_function, division, absolute_import
+from time import time
 import numpy as np
 import scipy.optimize as optimize
 import fitsio
+import sqlalchemy
+# from sqlalchemy import or_
 
 from .roboscheduler import Observer
 from .cadence import assignCadence
+
+
+def get_plates():
+    '''DESCRIPTION: Reads in APOGEE-II plate information from platedb
+    INPUT: None
+    OUTPUT: apg -- list of objects with all APOGEE-II plate information'''
+    start_time = time()
+
+    from petunia.plateDBtools.database.connections.MyLocalConnection import db
+
+    session = db.Session()
+    # currently, model classes should work equally well in north and south. this is desireable
+    from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
+    from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
+
+    try:
+        acceptedStatus = session.query(pdb.PlateStatus).filter(pdb.PlateStatus.label == "Accepted").one()
+    except sqlalchemy.orm.exc.NoResultFound:
+        raise Exception("Could not find 'Accepted' status in plate_status table")
+
+    # ##################################
+    # check up on this survey lable for live db
+    # ##################################
+
+    try:
+        survey = session.query(pdb.Survey).filter(pdb.Survey.label == "APOGEE-2").one()
+    except sqlalchemy.orm.exc.NoResultFound:
+        raise Exception("Could not find 'APOGEE-2' survey in survey table")
+
+    try:
+        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "APO").one()
+    except sqlalchemy.orm.exc.NoResultFound:
+        raise Exception("Could not find 'APO' location in plate_location table")
+
+    # Pull all relevant plate information for APOGEE plates
+    protoList = list()
+    with session.begin():
+        protoList = session.query(pdb.Plate.plate_id)\
+                .join(pdb.PlateToSurvey, pdb.Survey)\
+                .join(pdb.PlateLocation)\
+                .join(pdb.PlateToPlateStatus, pdb.PlateStatus)\
+                .filter(pdb.Survey.pk == survey.pk)\
+                .filter(pdb.Plate.location == plateLoc)\
+                .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
+        locIDS = session.query(pdb.Plate.location_id)\
+               .filter(pdb.Survey.pk == survey.pk)\
+               .filter(pdb.Plate.plate_id.in_(protoList)).all()
+        plate_query = session.query(pdb.Plate)\
+               .join(pdb.PlateToSurvey, pdb.Survey)\
+               .filter(pdb.Survey.pk == survey.pk)\
+               .filter(pdb.Plate.location_id.in_(locIDS)).all()
+
+    q1Time = time()
+    print('[SQL]: plate query completed in {} s'.format(q1Time-start_time))
+
+    plate_types = [("PLATE_ID", np.int32),
+                   ("FIELD", np.dtype("a20")),
+                   ("RA", np.float64),
+                   ("DEC", np.float64),
+                   ("HA", np.float64),
+                   ("HA_MIN", np.float64),
+                   ("HA_MAX", np.float64),
+                   ("SKYBRIGHTNESS", np.float64),
+                   ("CADENCE", np.dtype("a20")),
+                   ("PRIORITY", np.int32)]
+
+    PLATE_ID = list()
+    FIELD = list()
+    RA = list()
+    DEC = list()
+    HA = list()
+    HA_MIN = list()
+    HA_MAX = list()
+    SKYBRIGHTNESS = list()
+    CADENCE = list()
+    PRIORITY = list()
+
+    for p in plate_query[:100]:
+        PLATE_ID.append(int(p.plate_id))
+        FIELD.append(str(p.name))
+        RA.append(float(p.firstPointing.center_ra))
+        DEC.append(float(p.firstPointing.center_dec))
+        HA.append(float(p.firstPointing.platePointing(p.plate_id).hour_angle))
+        HA_MIN.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_min) - 7.5)
+        HA_MAX.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_max) + 7.5)
+        SKYBRIGHTNESS.append(1)
+        CADENCE.append("YSO")
+        PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
+
+    plates = np.zeros(len(PLATE_ID), dtype=plate_types)
+
+    plates["PLATE_ID"] = np.array(PLATE_ID)
+    plates["FIELD"] = np.array(FIELD)
+    plates["RA"] = np.array(RA)
+    plates["DEC"] = np.array(DEC)
+    plates["HA"] = np.array(HA)
+    plates["HA_MIN"] = np.array(HA_MIN)
+    plates["HA_MAX"] = np.array(HA_MAX)
+    plates["SKYBRIGHTNESS"] = np.array(SKYBRIGHTNESS)
+    plates["CADENCE"] = np.array(CADENCE)
+    plates["PRIORITY"] = np.array(PRIORITY)
+
+    buildTime = time()
+    print('[PY]: array built in {} s'.format(buildTime - q1Time))
+
+    return plates
 
 
 class Scheduler(object):
@@ -49,8 +158,9 @@ class Scheduler(object):
         For now this is a fits file, needs to be DB query soon
         """
 
-        self._plates = fitsio.read(self.platePath)
+        # self._plates = fitsio.read(self.platePath)
         self._plateIDtoField = dict()
+        self._plates = get_plates()
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
@@ -172,6 +282,9 @@ class Scheduler(object):
             duration in minutes; will be converted to decimal days
         """
 
+        if len(plates) == 0:
+            return []
+
         window_lst_start = self.Observer.lst(mjd) / 15.
         window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
 
@@ -225,6 +338,8 @@ class Scheduler(object):
     def prioritize(self, plates):
         """prioritize observable plates
         """
+        if len(plates) == 0:
+            return np.array([])
         base = plates["PRIORITY"] * 100.0
 
         # super boost pri 10 plates
@@ -475,7 +590,7 @@ class Scheduler(object):
                         bright_starts.append({"obsmjd": now,
                                               "exposure_length": 50,
                                               "plate": None,
-                                                  "cart": -1
+                                              "cart": -1
                         })
                         now += 50 / 60 / 24
 
