@@ -158,9 +158,9 @@ class Scheduler(object):
         For now this is a fits file, needs to be DB query soon
         """
 
-        # self._plates = fitsio.read(self.platePath)
+        self._plates = fitsio.read(self.platePath)
         self._plateIDtoField = dict()
-        self._plates = get_plates()
+        # self._plates = get_plates()
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
@@ -244,7 +244,6 @@ class Scheduler(object):
                         s["cart"] = k
                         del available[k]
                         break
-
 
 
     def _inverseMoon(self, mjd):
@@ -633,14 +632,21 @@ class Scheduler(object):
                                 i = -1
                                 break
                         if i != -1:
-                            tonight_ids.append(rm_obs[sorted_priorities[i]]["PLATE_ID"])
+                            this_plate = rm_obs[sorted_priorities[i]]
+
+                            tonight_ids.append(this_plate["PLATE_ID"])
+
+                            alt, az = self.Observer.radec2altaz(mjd=now,
+                                                            ra=this_plate["RA"],
+                                                            dec=this_plate["DEC"])
+                            exp_time = darkExpTime(alt, default=120)
 
                             dark_starts.append({"obsmjd": now,
-                                                  "exposure_length": 120,
-                                                  "plate": rm_obs[sorted_priorities[i]]["PLATE_ID"],
-                                                  "cart": None
+                                                "exposure_length": exp_time,
+                                                "plate": this_plate["PLATE_ID"],
+                                                "cart": None
                                 })
-                            now += 120 / 60 / 24
+                            now += exp_time / 60 / 24
                             rm_sched += 1
                             rm_this = True
                 if not rm_this:
@@ -658,26 +664,33 @@ class Scheduler(object):
                                 break
                         if i == -1:
                             dark_starts.append({"obsmjd": now,
-                                                  "exposure_length": 87,
-                                                  "plate": None,
-                                                  "cart": -1
+                                                "exposure_length": 87,
+                                                "plate": None,
+                                                "cart": -1
                             })
                             now += 87 / 60 / 24
                         else:
-                            tonight_ids.append(aqmes_obs[sorted_priorities[i]]["PLATE_ID"])
+                            this_plate = aqmes_obs[sorted_priorities[i]]
+
+                            tonight_ids.append(this_plate["PLATE_ID"])
+
+                            alt, az = self.Observer.radec2altaz(mjd=now,
+                                                            ra=this_plate["RA"],
+                                                            dec=this_plate["DEC"])
+                            exp_time = darkExpTime(alt, default=67) + 20  # + overhead
 
                             dark_starts.append({"obsmjd": now,
-                                                  "exposure_length": 87,
-                                                  "plate": aqmes_obs[sorted_priorities[i]]["PLATE_ID"],
-                                                  "cart": None
+                                                "exposure_length": exp_time,
+                                                "plate": this_plate["PLATE_ID"],
+                                                "cart": None
                                 })
-                            now += 87 / 60 / 24
+                            now += exp_time / 60 / 24
                     else:
                         # everything else failed
                         dark_starts.append({"obsmjd": now,
-                                              "exposure_length": 87,
-                                              "plate": None,
-                                              "cart": -1
+                                            "exposure_length": 87,
+                                            "plate": None,
+                                            "cart": -1
                         })
                         now += 87 / 60 / 24
 
@@ -748,3 +761,22 @@ def lstDiff(a, b):
             return wrap
         else:
             return simple
+
+
+def darkExpTime(alt, default=67):
+    """Compute the expected exposure time for a dark plate
+       at a given altitude
+
+       alt: float, altitude of the plate
+
+       default: float/int, normal visit length
+    """
+
+    airmass = 1. / np.sin(np.pi / 180. * float(alt))
+
+    # compute additional time
+    expected_time = default * airmass
+
+    # extra_exp = expected_time / 15.
+
+    return expected_time
