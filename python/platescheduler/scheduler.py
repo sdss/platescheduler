@@ -6,7 +6,7 @@ import numpy as np
 import scipy.optimize as optimize
 import fitsio
 import sqlalchemy
-# from sqlalchemy import or_
+from sqlalchemy import or_
 
 from .roboscheduler import Observer
 from .cadence import assignCadence
@@ -35,12 +35,17 @@ def get_plates():
     # ##################################
 
     try:
-        survey = session.query(pdb.Survey).filter(pdb.Survey.label == "APOGEE-2").one()
+        mwm = session.query(pdb.Survey).filter(pdb.Survey.label == "MWM").one()
     except sqlalchemy.orm.exc.NoResultFound:
-        raise Exception("Could not find 'APOGEE-2' survey in survey table")
+        raise Exception("Could not find 'mwm' survey in survey table")
 
     try:
-        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "APO").one()
+        bhm = session.query(pdb.Survey).filter(pdb.Survey.label == "BHM").one()
+    except sqlalchemy.orm.exc.NoResultFound:
+        raise Exception("Could not find 'bhm' survey in survey table")
+
+    try:
+        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "Design").one()
     except sqlalchemy.orm.exc.NoResultFound:
         raise Exception("Could not find 'APO' location in plate_location table")
 
@@ -51,15 +56,15 @@ def get_plates():
                 .join(pdb.PlateToSurvey, pdb.Survey)\
                 .join(pdb.PlateLocation)\
                 .join(pdb.PlateToPlateStatus, pdb.PlateStatus)\
-                .filter(pdb.Survey.pk == survey.pk)\
-                .filter(pdb.Plate.location == plateLoc)\
-                .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
+                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
+                .filter(pdb.Plate.location == plateLoc).all()
+                # .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
         locIDS = session.query(pdb.Plate.location_id)\
-               .filter(pdb.Survey.pk == survey.pk)\
+               .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
                .filter(pdb.Plate.plate_id.in_(protoList)).all()
         plate_query = session.query(pdb.Plate)\
                .join(pdb.PlateToSurvey, pdb.Survey)\
-               .filter(pdb.Survey.pk == survey.pk)\
+               .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
                .filter(pdb.Plate.location_id.in_(locIDS)).all()
 
     q1Time = time()
@@ -87,7 +92,9 @@ def get_plates():
     CADENCE = list()
     PRIORITY = list()
 
-    for p in plate_query[:100]:
+    for p in plate_query:
+        if p.plate_id > 30000:
+            continue
         PLATE_ID.append(int(p.plate_id))
         FIELD.append(str(p.name))
         RA.append(float(p.firstPointing.center_ra))
@@ -96,7 +103,7 @@ def get_plates():
         HA_MIN.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_min) - 7.5)
         HA_MAX.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_max) + 7.5)
         SKYBRIGHTNESS.append(1)
-        CADENCE.append("YSO")
+        CADENCE.append(p.design.designDictionary["cadence"])
         PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
     plates = np.zeros(len(PLATE_ID), dtype=plate_types)
@@ -158,9 +165,9 @@ class Scheduler(object):
         For now this is a fits file, needs to be DB query soon
         """
 
-        self._plates = fitsio.read(self.platePath)
+        # self._plates = fitsio.read(self.platePath)
         self._plateIDtoField = dict()
-        # self._plates = get_plates()
+        self._plates = get_plates()
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
