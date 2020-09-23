@@ -23,7 +23,9 @@ def rmCadence(mjd, hist=[], **kwargs):
     deltas = np.array(hist) - last_full_moon
     this_month = np.where(deltas > 0)
 
-    return len(this_month[0]) < 10
+    deltas = mjd - np.array(hist)
+
+    return len(this_month[0]) < 10 and np.min(deltas) > 1
 
 
 def AQMESmedium(mjd, hist=[], **kwargs):
@@ -129,11 +131,11 @@ def rv12(mjd, hist=[], **kwargs):
     deltas = mjd - np.array(hist)
     this_month = deltas[np.where(deltas < 15)]
 
-    if len(deltas) > 2:
+    if len(deltas) > 3:
         return False
 
     # would allow for observations more than a week after previous
-    return np.min(deltas) > 2
+    return np.min(deltas) > 1
 
 
 def tess(mjd, hist=[], **kwargs):
