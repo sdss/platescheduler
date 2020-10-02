@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 from time import time
 import numpy as np
 import scipy.optimize as optimize
-import fitsio
+# import fitsio
 import sqlalchemy
 from sqlalchemy import or_
 
@@ -45,7 +45,12 @@ def get_plates():
         raise Exception("Could not find 'bhm' survey in survey table")
 
     try:
-        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "Design").one()
+        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "UW").one()
+    except sqlalchemy.orm.exc.NoResultFound:
+        raise Exception("Could not find 'APO' location in plate_location table")
+
+    try:
+        plateLoc2 = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "APO").one()
     except sqlalchemy.orm.exc.NoResultFound:
         raise Exception("Could not find 'APO' location in plate_location table")
 
@@ -57,7 +62,8 @@ def get_plates():
                 .join(pdb.PlateLocation)\
                 .join(pdb.PlateToPlateStatus, pdb.PlateStatus)\
                 .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
-                .filter(pdb.Plate.location == plateLoc).all()
+                .filter(or_(pdb.Plate.location == plateLoc, pdb.Plate.location == plateLoc2)).all()
+                # .filter(pdb.Plate.location == plateLoc).all()
                 # .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
         locIDS = session.query(pdb.Plate.location_id)\
                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
@@ -93,8 +99,10 @@ def get_plates():
     PRIORITY = list()
 
     for p in plate_query:
-        if p.plate_id > 30000:
+        if "cadence" not in p.design.designDictionary:
+            print("skipping: ", p.plate_id)
             continue
+
         PLATE_ID.append(int(p.plate_id))
         FIELD.append(str(p.name))
         RA.append(float(p.firstPointing.center_ra))
@@ -149,6 +157,14 @@ class Scheduler(object):
 
         self.moon_threshold = 15.
         self._last_full_moon = None
+
+        # exp  times
+        self.aqm_time = 60
+        self.rm_time = 120
+        self.apogee_time = 67
+        self.gg_time = 33
+        self.overhead = 20
+
 
 
     def getObs(self):
@@ -381,8 +397,8 @@ class Scheduler(object):
         dark_start = bool(self.Observer.skybrightness(night_start + 1 / 24) < 0.35)
         dark_end = bool(self.Observer.skybrightness(night_end - 1 / 24) < 0.35)
 
-        short_slot = (30 + 20) / 60 / 24  # 30 min GG size
-        dark_slot = (67 + 20) / 60 / 24
+        short_slot = (self.gg_time + self.overhead) / 60 / 24  # 30 min GG size
+        dark_slot = (self.aqm_time + self.overhead) / 60 / 24
 
         split_night = False
         if bright_start and bright_end:
@@ -404,7 +420,7 @@ class Scheduler(object):
             rm_slots = 1
             dark_slots = int(remainder // dark_slot)
             extra = remainder % (dark_slots * dark_slot)
-            if extra >= 67 / 60 / 24:
+            if extra >= self.apogee_time / 60 / 24:
                 # we can ignore a second overhead on a full darknight
                 dark_slots += 1
                 bright_slots = 0
@@ -444,19 +460,19 @@ class Scheduler(object):
 
         if split_night:
             bright_slots = int(bright_time // short_slot)
-            if dark_time > 2 / 24:
+            if dark_time > self.rm_time / 60 / 24:
                 # again assume the free overhead is for RM exposure
                 rm_slots = 1
-                dark_time = dark_time - 2 / 24
+                dark_time = dark_time - self.rm_time / 60 / 24
             else:
                 rm_slots = 0
             dark_slots = int(dark_time // dark_slot)
 
             extra = dark_time % (dark_slots * dark_slot)
-            if extra >= 67 / 60 / 24 and rm_slots == 0:
+            if extra >= self.apogee_time / 60 / 24 and rm_slots == 0:
                 # we can give this slot the free overhead
                 dark_slots += 1
-            elif extra >= 30 / 60 / 24:
+            elif extra >= self.gg_time / 60 / 24:
                 # ignore the overhead and add a GG plate
                 bright_slots += 1
 
@@ -481,13 +497,15 @@ class Scheduler(object):
                 bright_slots_long = avail
 
             bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
-            bright_waste = bright_total - 50 * bright_slots_short - 87 * bright_slots_long
+            bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+                                        - (self.apogee_time + self.overhead) * bright_slots_long
             # print(f"waste:        {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
             while bright_waste > 37:
                 # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
                 bright_slots_short -= 1
                 bright_slots_long += 1
-                bright_waste = bright_total - 50 * bright_slots_short - 87 * bright_slots_long
+                bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+                                            - (self.apogee_time + self.overhead) * bright_slots_long
                 # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
 
             assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
@@ -496,10 +514,10 @@ class Scheduler(object):
             bright_slots_short = bright_slots
             bright_slots_long = 0
 
-        gg_len = [30 + 20 for i in range(bright_slots_short)]
-        long_bright =[67 + 20 for i in range(bright_slots_long)]
-        dark_lengths = [67 + 20 for i in range(dark_slots)]
-        rm_lengths = [120 for i in range(rm_slots)]
+        gg_len = [self.gg_time + self.overhead for i in range(bright_slots_short)]
+        long_bright =[self.apogee_time + self.overhead for i in range(bright_slots_long)]
+        dark_lengths = [self.aqm_time + self.overhead for i in range(dark_slots)]
+        rm_lengths = [self.rm_time for i in range(rm_slots)]
 
         all_lengths = np.sum(gg_len) + np.sum(long_bright) + np.sum(dark_lengths) + np.sum(rm_lengths)
 
@@ -554,11 +572,11 @@ class Scheduler(object):
                             tonight_ids.append(gg_obs[sorted_priorities[i]]["PLATE_ID"])
 
                             bright_starts.append({"obsmjd": now,
-                                                  "exposure_length": 50,
+                                                  "exposure_length": self.gg_time,
                                                   "plate": gg_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
-                            now += 50 / 60 / 24
+                            now += (self.gg_time + self.overhead) / 60 / 24
                             gg_sched += 1
                             gg_this = True
                 if not gg_this:
@@ -577,35 +595,35 @@ class Scheduler(object):
                                 break
                         if i == -1:
                             bright_starts.append({"obsmjd": now,
-                                                  "exposure_length": 50,
-                                                  "plate": None,
+                                                  "exposure_length": self.gg_time,
+                                                  "plate": -1,
                                                   "cart": -1
                             })
-                            now += 50 / 60 / 24
+                            now += (self.gg_time + self.overhead) / 60 / 24
                         else:
                             tonight_ids.append(long_obs[sorted_priorities[i]]["PLATE_ID"])
 
                             bright_starts.append({"obsmjd": now,
-                                                  "exposure_length": 87,
+                                                  "exposure_length": self.apogee_time,
                                                   "plate": long_obs[sorted_priorities[i]]["PLATE_ID"],
                                                   "cart": None
                                 })
-                            now += 87 / 60 / 24
+                            now += (self.apogee_time + self.overhead) / 60 / 24
                     else:
                         # everything else failed
                         bright_starts.append({"obsmjd": now,
-                                              "exposure_length": 50,
-                                              "plate": None,
+                                              "exposure_length": self.gg_time,
+                                              "plate": -1,
                                               "cart": -1
                         })
-                        now += 50 / 60 / 24
+                        now += (self.gg_time + self.overhead) / 60 / 24
 
                 # strip overhead appropriately
                 # except petunia doesn't care about overhead... leave it alone for now
                 # if night_sched["bright_start"] == night_sched["obsmjd"]:
-                #     bright_starts[0]["exposure_length"] -= 20
+                #     bright_starts[0]["exposure_length"] -= self.overhead
                 # if night_sched["bright_end"] == night_sched["end"]:
-                #     bright_starts[-1]["exposure_length"] -= 20
+                #     bright_starts[-1]["exposure_length"] -= self.overhead
 
         if night_sched["dark_start"] > 0:
             self.last_full_moon(mjd)
@@ -646,7 +664,7 @@ class Scheduler(object):
                             alt, az = self.Observer.radec2altaz(mjd=now,
                                                             ra=this_plate["RA"],
                                                             dec=this_plate["DEC"])
-                            exp_time = darkExpTime(alt, default=120)
+                            exp_time = darkExpTime(alt, default=self.rm_time)
 
                             dark_starts.append({"obsmjd": now,
                                                 "exposure_length": exp_time,
@@ -671,11 +689,11 @@ class Scheduler(object):
                                 break
                         if i == -1:
                             dark_starts.append({"obsmjd": now,
-                                                "exposure_length": 87,
-                                                "plate": None,
+                                                "exposure_length": self.aqm_time,
+                                                "plate": -1,
                                                 "cart": -1
                             })
-                            now += 87 / 60 / 24
+                            now += (self.aqm_time + self.overhead) / 60 / 24
                         else:
                             this_plate = aqmes_obs[sorted_priorities[i]]
 
@@ -684,22 +702,22 @@ class Scheduler(object):
                             alt, az = self.Observer.radec2altaz(mjd=now,
                                                             ra=this_plate["RA"],
                                                             dec=this_plate["DEC"])
-                            exp_time = darkExpTime(alt, default=67) + 20  # + overhead
+                            exp_time = darkExpTime(alt, default=self.aqm_time)
 
                             dark_starts.append({"obsmjd": now,
                                                 "exposure_length": exp_time,
                                                 "plate": this_plate["PLATE_ID"],
                                                 "cart": None
                                 })
-                            now += exp_time / 60 / 24
+                            now += (exp_time + self.overhead) / 60 / 24
                     else:
                         # everything else failed
                         dark_starts.append({"obsmjd": now,
-                                            "exposure_length": 87,
-                                            "plate": None,
+                                            "exposure_length": self.aqm_time,
+                                            "plate": -1,
                                             "cart": -1
                         })
-                        now += 87 / 60 / 24
+                        now += (self.aqm_time + self.overhead) / 60 / 24
 
         self.assignCarts(bright_starts, dark_starts)
 

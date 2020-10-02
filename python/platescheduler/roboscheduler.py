@@ -184,18 +184,19 @@ class Observer(SchedulerBase):
                  dark_twilight=-15., bright_twilight=-8.):
         """Create Observer object"""
         # super().__init__()
-        self.observatory = observatory
-        if(observatoryfile is None):
-            observatoryfile = os.path.join(os.getenv('ROBOSCHEDULER_DIR'),
-                                           'data', 'observatories.par')
-        self._file = observatoryfile
-        self._data = yanny.yanny(self._file)
-        observatories = np.array([obs.decode()
-                                  for obs in
-                                  self._data['OBSERVATORY']['observatory']])
-        indx = np.where(observatories == self.observatory)[0]
-        self.latitude = self._data['OBSERVATORY']['latitude'][indx]
-        self.longitude = self._data['OBSERVATORY']['longitude'][indx]
+        # self.observatory = observatory
+        # if(observatoryfile is None):
+        #     observatoryfile = os.path.join(os.getenv('ROBOSCHEDULER_DIR'),
+        #                                    'data', 'observatories.par')
+        # self._file = observatoryfile
+        # self._data = yanny.yanny(self._file)
+        # observatories = np.array([obs.decode()
+        #                           for obs in
+        #                           self._data['OBSERVATORY']['observatory']])
+        # indx = np.where(observatories == self.observatory)[0]
+
+        self.latitude = 32.7797556
+        self.longitude = -105.82027778
         self.dark_twilight = np.float32(dark_twilight)
         self.bright_twilight = np.float32(bright_twilight)
         return
