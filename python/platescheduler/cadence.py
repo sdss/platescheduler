@@ -25,7 +25,7 @@ def rmCadence(mjd, hist=[], **kwargs):
 
     deltas = mjd - np.array(hist)
 
-    return len(this_month[0]) < 10 and np.min(deltas) > 1
+    return len(this_month[0]) < 5 and np.min(deltas) > 3
 
 
 def AQMESmedium(mjd, hist=[], **kwargs):
