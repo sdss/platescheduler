@@ -68,7 +68,7 @@ def get_plates():
         locIDS = session.query(pdb.Plate.location_id)\
                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
                .filter(pdb.Plate.plate_id.in_(protoList)).all()
-        plate_query = session.query(pdb.Plate, pdb.Survey)\
+        plate_query = session.query(pdb.Plate)\
                .join(pdb.PlateToSurvey, pdb.Survey)\
                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
                .filter(pdb.Plate.location_id.in_(locIDS)).all()
@@ -76,7 +76,7 @@ def get_plates():
     q1Time = time()
     print('[SQL]: plate query completed in {} s'.format(q1Time-start_time))
 
-    exposedPlates = [p[0].plate_id for p in plate_query]
+    exposedPlates = [p.plate_id for p in plate_query]
     exposures = session.query(sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3),\
                  pdb.Plate.plate_id, qldb.Quickred.snr_standard, qldb.Reduction.snr)\
                 .join(pdb.ExposureFlavor).join(pdb.Observation).join(pdb.PlatePointing)\
@@ -107,30 +107,32 @@ def get_plates():
     PRIORITY = list()
 
     for p in plate_query:
-        if "cadence" not in p[0].design.designDictionary:
-            print("skipping: ", p[0].plate_id)
+        if "cadence" not in p.design.designDictionary:
+            print("skipping: ", p.plate_id)
             continue
 
-        survey = p[1].label
-        field = str(p[0].name)
+        survey_mode = p.currentSurveyMode.definition_label
+        field = str(p.name)
 
-        PLATE_ID.append(int(p[0].plate_id))
+        # print(p.plate_id, survey_mode)
+
+        PLATE_ID.append(int(p.plate_id))
         FIELD.append(field)
         if not field in field_exp_hist:
             field_exp_hist[field] = list()
-        RA.append(float(p[0].firstPointing.center_ra))
-        DEC.append(float(p[0].firstPointing.center_dec))
-        HA.append(float(p[0].firstPointing.platePointing(p[0].plate_id).hour_angle))
-        HA_MIN.append(float(p[0].firstPointing.platePointing(p[0].plate_id).ha_observable_min) - 7.5)
-        HA_MAX.append(float(p[0].firstPointing.platePointing(p[0].plate_id).ha_observable_max) + 7.5)
-        if survey == "MWM":
+        RA.append(float(p.firstPointing.center_ra))
+        DEC.append(float(p.firstPointing.center_dec))
+        HA.append(float(p.firstPointing.platePointing(p.plate_id).hour_angle))
+        HA_MIN.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_min) - 7.5)
+        HA_MAX.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_max) + 7.5)
+        if survey_mode.lower() == "mwmlead":
             SKYBRIGHTNESS.append(1)
         else:
             SKYBRIGHTNESS.append(0.35)
-        CADENCE.append(p[0].design.designDictionary["cadence"])
-        PRIORITY.append(float(p[0].firstPointing.platePointing(p[0].plate_id).priority))
+        CADENCE.append(p.design.designDictionary["cadence"])
+        PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
-        if survey == "MWM":
+        if survey_mode.lower() == "mwmlead":
             plate_mjds = np.array(plate_exps[PLATE_ID[-1]])
             mjds = np.unique(plate_mjds)
             for m in mjds:
@@ -139,7 +141,7 @@ def get_plates():
                     # assume 2 exps count for a AB pair
                     field_exp_hist[field].append(m)
         else:
-            for plug in p[0].pluggings:
+            for plug in p.pluggings:
                 for s in plug.scienceExposures():
                     if "good" in s.status.label.lower():
                         field_exp_hist[field].append(s.mjd)
@@ -226,6 +228,7 @@ class Scheduler(object):
             if not p["CADENCE"] in self._cadences:
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
             self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
+            # print("{pid:6d} {field:10s} {bright:5.2f}".format(pid=p["PLATE_ID"], field=p["FIELD"], bright=p["SKYBRIGHTNESS"]))
 
 
     @property
@@ -313,8 +316,8 @@ class Scheduler(object):
                         del available[k]
                         break
 
-        print(self.carts)
-        print(bright_starts + dark_starts)
+        # print(self.carts)
+        # print(bright_starts + dark_starts)
 
         for s in bright_starts + dark_starts:
             if s["cart"] is None:
@@ -576,8 +579,6 @@ class Scheduler(object):
         all_lengths = np.sum(gg_len) + np.sum(long_bright) + np.sum(dark_lengths) + np.sum(rm_lengths)
 
         waste = nightLength - all_lengths / 60 /24
-
-        print(night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste)
 
         return night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste
 
