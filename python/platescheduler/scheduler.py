@@ -2,6 +2,8 @@
 
 from __future__ import print_function, division, absolute_import
 from time import time
+import os
+
 import numpy as np
 import scipy.optimize as optimize
 # import fitsio
@@ -11,11 +13,13 @@ from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
 import sqlalchemy
 from sqlalchemy import or_
 
+import yaml
+
 from .roboscheduler import Observer
 from .cadence import assignCadence
 
 
-def get_plates():
+def get_plates(session):
     '''DESCRIPTION: Reads in APOGEE-II plate information from platedb
     INPUT: None
     OUTPUT: apg -- list of objects with all APOGEE-II plate information'''
@@ -23,7 +27,7 @@ def get_plates():
 
     from petunia.plateDBtools.database.connections.MyLocalConnection import db
 
-    session = db.Session()
+    # session = db.Session()
 
     try:
         acceptedStatus = session.query(pdb.PlateStatus).filter(pdb.PlateStatus.label == "Accepted").one()
@@ -186,8 +190,11 @@ class Scheduler(object):
 
     """
 
-    def __init__(self, platePath=None, airmass_limit=2., dark_limit=0.35):
-        self.platePath = platePath
+    def __init__(self, session=None, airmass_limit=2., dark_limit=0.35):
+        if session is None:
+            self.session = db.Session()
+        else:
+            self.session = session
         self._plates = None
         self._plateIDtoField = None
         self._cadences = {}
@@ -222,7 +229,7 @@ class Scheduler(object):
 
         # self._plates = fitsio.read(self.platePath)
         self._plateIDtoField = dict()
-        self._plates, self.obs_hist = get_plates()
+        self._plates, self.obs_hist = get_plates(self.session)
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
@@ -251,17 +258,27 @@ class Scheduler(object):
         For now hardcode, but this will need to get carts from DB soon
         """
 
-        self._carts = {
-            1: {"type": "BOTH", "plate": 0},
-            2: {"type": "BOTH", "plate": 0},
-            3: {"type": "BOTH", "plate": 0},
-            4: {"type": "BOTH", "plate": 0},
-            5: {"type": "BOSS", "plate": 0},
-            6: {"type": "BOTH", "plate": 0},
-            7: {"type": "BOTH", "plate": 0},
-            8: {"type": "BOTH", "plate": 0},
-            9: {"type": "BOTH", "plate": 0},
-        }
+        # self._carts = {
+        #     1: {"type": "BOTH", "plate": 0},
+        #     2: {"type": "BOTH", "plate": 0},
+        #     3: {"type": "BOTH", "plate": 0},
+        #     4: {"type": "BOTH", "plate": 0},
+        #     5: {"type": "BOSS", "plate": 0},
+        #     6: {"type": "BOTH", "plate": 0},
+        #     7: {"type": "BOTH", "plate": 0},
+        #     8: {"type": "BOTH", "plate": 0},
+        #     9: {"type": "BOTH", "plate": 0},
+        # }
+
+        self._carts = yaml.load(open(os.path.expanduser("~/.cart_status.yml")))
+
+        currentplug = self.session.query(pdb.Cartridge.number, pdb.Plate.plate_id)\
+                                .join(pdb.Plugging).join(pdb.Plate).join(pdb.ActivePlugging)\
+                                .order_by(pdb.Cartridge.number).all()
+
+        for cart, plate in currentplug:
+            assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
+            self._carts[cart]["plate"] = plate
 
 
     @property
