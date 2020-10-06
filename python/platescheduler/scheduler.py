@@ -200,6 +200,7 @@ class Scheduler(object):
         self._cadences = {}
         self.obs_hist = None
         self._carts = None
+        self._plugged_plates = list()
 
         self.bright_cadences = ["YSO", "RV6", "RV12"]
 
@@ -279,6 +280,7 @@ class Scheduler(object):
         for cart, plate in currentplug:
             assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
             self._carts[cart]["plate"] = plate
+            self._plugged_plates.append(int(plate))
 
 
     @property
@@ -436,9 +438,11 @@ class Scheduler(object):
             return np.array([])
         base = plates["PRIORITY"] * 100.0
 
+        plugged = [300 if p["PLATE_ID"] in self._plugged_plates else 0 for p in plates]
+
         # super boost pri 10 plates
         pri_ten = [1e4 if p > 950 else 0 for p in base]
-        base = base + np.array(pri_ten)
+        base = base + np.array(pri_ten) + np.array(plugged)
 
         # gaussian de-weight for easier plates
         dec = base - 50.0 * np.power(np.exp(-1 * (plates["DEC"] - 33)), 2) / (2 * 20**2)
