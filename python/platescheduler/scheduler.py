@@ -48,15 +48,15 @@ def get_plates(session):
     except sqlalchemy.orm.exc.NoResultFound:
         raise Exception("Could not find 'bhm' survey in survey table")
 
-    try:
-        plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "UW").one()
-    except sqlalchemy.orm.exc.NoResultFound:
-        raise Exception("Could not find 'APO' location in plate_location table")
+    # try:
+    #     plateLoc = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "UW").one()
+    # except sqlalchemy.orm.exc.NoResultFound:
+    #     raise Exception("Could not find 'APO' location in plate_location table")
 
-    try:
-        plateLoc2 = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "APO").one()
-    except sqlalchemy.orm.exc.NoResultFound:
-        raise Exception("Could not find 'APO' location in plate_location table")
+    # try:
+    #     plateLoc2 = session.query(pdb.PlateLocation).filter(pdb.PlateLocation.label == "APO").one()
+    # except sqlalchemy.orm.exc.NoResultFound:
+    #     raise Exception("Could not find 'APO' location in plate_location table")
 
     # Pull all relevant plate information for APOGEE plates
     protoList = list()
@@ -65,8 +65,8 @@ def get_plates(session):
                 .join(pdb.PlateToSurvey, pdb.Survey)\
                 .join(pdb.PlateLocation)\
                 .join(pdb.PlateToPlateStatus, pdb.PlateStatus)\
-                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
-                .filter(or_(pdb.Plate.location == plateLoc, pdb.Plate.location == plateLoc2)).all()
+                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk)).all()
+                # .filter(or_(pdb.Plate.location == plateLoc, pdb.Plate.location == plateLoc2)).all()
                 # .filter(pdb.Plate.location == plateLoc).all()
                 # .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
         locIDS = session.query(pdb.Plate.location_id)\
@@ -112,7 +112,7 @@ def get_plates(session):
 
     for p in plate_query:
         if "cadence" not in p.design.designDictionary:
-            print("skipping: ", p.plate_id)
+            # print("skipping: ", p.plate_id)
             continue
 
         survey_mode = p.currentSurveyMode.definition_label
