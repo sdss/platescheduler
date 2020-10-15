@@ -68,10 +68,10 @@ def get_plates(session):
                 .join(pdb.PlateToSurvey, pdb.Survey)\
                 .join(pdb.PlateLocation)\
                 .join(pdb.PlateToPlateStatus, pdb.PlateStatus)\
+                .filter(pdb.PlateStatus.pk == acceptedStatus.pk)\
                 .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk)).all()
                 # .filter(or_(pdb.Plate.location == plateLoc, pdb.Plate.location == plateLoc2)).all()
                 # .filter(pdb.Plate.location == plateLoc).all()
-                # .filter(pdb.PlateStatus.pk == acceptedStatus.pk).all()
         locIDS = session.query(pdb.Plate.location_id)\
                .filter(or_(pdb.Survey.pk == bhm.pk, pdb.Survey.pk == mwm.pk))\
                .filter(pdb.Plate.plate_id.in_(protoList)).all()
@@ -116,6 +116,9 @@ def get_plates(session):
     for p in plate_query:
         if "cadence" not in p.design.designDictionary:
             # print("skipping: ", p.plate_id)
+            continue
+        elif p.statuses[0].label != "Accepted":
+            print("skipped {} NOT ACCEPTED!".format(p.plate_id))
             continue
 
         survey_mode = p.currentSurveyMode.definition_label
