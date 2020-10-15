@@ -6,14 +6,21 @@ import os
 
 import numpy as np
 import scipy.optimize as optimize
-# import fitsio
-from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
-from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
+# import fitsio # TEST
 
 import sqlalchemy
 from sqlalchemy import or_
 
 import yaml
+
+try:
+    from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
+    from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
+except:
+    # need the plate connection
+    from petunia.plateDBtools.database.connections.MyLocalConnection import db
+    from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
+    from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
 
 from .roboscheduler import Observer
 from .cadence import assignCadence
@@ -24,10 +31,6 @@ def get_plates(session):
     INPUT: None
     OUTPUT: apg -- list of objects with all APOGEE-II plate information'''
     start_time = time()
-
-    from petunia.plateDBtools.database.connections.MyLocalConnection import db
-
-    # session = db.Session()
 
     try:
         acceptedStatus = session.query(pdb.PlateStatus).filter(pdb.PlateStatus.label == "Accepted").one()
@@ -192,6 +195,11 @@ class Scheduler(object):
 
     def __init__(self, session=None, airmass_limit=2., dark_limit=0.35):
         if session is None:
+            try:
+                db
+            except:
+                # I can't imagine this happening, but
+                from petunia.plateDBtools.database.connections.MyLocalConnection import db
             self.session = db.Session()
         else:
             self.session = session
@@ -221,14 +229,13 @@ class Scheduler(object):
         self.overhead = 20
 
 
-
     def pullPlates(self):
         """Read in plates for scheduling
 
         For now this is a fits file, needs to be DB query soon
         """
 
-        # self._plates = fitsio.read(self.platePath)
+        # self._plates = fitsio.read(platePath) # TEST
         self._plateIDtoField = dict()
         self._plates, self.obs_hist = get_plates(self.session)
 
@@ -236,6 +243,7 @@ class Scheduler(object):
             if not p["CADENCE"] in self._cadences:
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
             self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
+            # self.obs_hist[p["FIELD"]] = []  # TEST
             # print("{pid:6d} {field:10s} {bright:5.2f}".format(pid=p["PLATE_ID"], field=p["FIELD"], bright=p["SKYBRIGHTNESS"]))
 
 
@@ -299,13 +307,13 @@ class Scheduler(object):
         available = {k: v["type"] for k, v in self.carts.items()} # definitely want a copy
 
         for s in bright_starts:
-            if s["cart"] is None:
+            if s["cart"] is None and s["plate"] != -1:
                 if s["plate"] in plugged:
                     s["cart"] = plugged[s["plate"]]
                     del available[plugged[s["plate"]]]
 
         for s in dark_starts:
-            if s["cart"] is None:
+            if s["cart"] is None and s["plate"] != -1:
                 if s["plate"] in plugged:
                     s["cart"] = plugged[s["plate"]]
                     del available[plugged[s["plate"]]]
@@ -318,7 +326,7 @@ class Scheduler(object):
         # (assign bright apogee only, then dark boss only, then triage "both")
 
         for s in bright_starts:
-            if s["cart"] is None:
+            if s["cart"] is None and s["plate"] != -1:
                 for k, v in available.items():
                     if v in ["BOTH", "APOGEE"]:
                         s["cart"] = k
@@ -326,11 +334,9 @@ class Scheduler(object):
                         break
 
         for s in dark_starts:
-            if s["cart"] is None:
+            if s["cart"] is None and s["plate"] != -1:
                 for k, v in available.items():
-                    print(v)
                     if v in ["BOTH", "BOSS"]:
-                        print(k, s["plate"])
                         s["cart"] = k
                         del available[k]
                         break
@@ -339,7 +345,9 @@ class Scheduler(object):
         # print(bright_starts + dark_starts)
 
         for s in bright_starts + dark_starts:
-            if s["cart"] is None:
+            if s["cart"] is None and s["plate"] != -1:
+                # for s in bright_starts + dark_starts:
+                #     print(s)
                 raise Exception("no cart assigned for {}".format(s["plate"]))
 
 
@@ -399,6 +407,9 @@ class Scheduler(object):
                 end -= 24
             start_diff = float(lstDiff(start, window_lst_start))
             end_diff = float(lstDiff(end, window_lst_end))
+
+            # if p["PLATE_ID"] < 20003:
+            #     print("{:5d} {:.2f} {:.2f} {:.2f} {:.2f}".format(p["PLATE_ID"], float(window_lst_start), float(window_lst_end), float(start), float(end)))
 
             if start_diff < 0:
                 # start is less than window start
@@ -536,10 +547,12 @@ class Scheduler(object):
 
         if split_night:
             bright_slots = int(bright_time // short_slot)
-            if dark_time > self.rm_time / 60 / 24:
+            if dark_time > (self.rm_time + self.overhead) / 60 / 24:
                 # again assume the free overhead is for RM exposure
-                rm_slots = 1
-                dark_time = dark_time - self.rm_time / 60 / 24
+                rm_slots = 2
+                # 2 RM slots because small windows
+                # overhead for cart change
+                dark_time = dark_time - (self.rm_time - self.overhead) / 60 / 24
             else:
                 rm_slots = 0
             dark_slots = int(dark_time // dark_slot)
@@ -553,11 +566,12 @@ class Scheduler(object):
                 bright_slots += 1
 
         slots = np.sum([bright_slots, dark_slots, rm_slots])
+        # print(slots, "||", bright_slots, dark_slots, rm_slots)
         bright_carts = [v["type"] for k, v in self.carts.items() if v["type"] in ["BOTH", "APOGEE"]]
         if slots > len(self.carts):
             used = dark_slots + rm_slots
             avail = min(len(self.carts) - used, len(bright_carts))
-            print(mjd, avail, len(self.carts) - used, len(bright_carts))
+            # print(mjd, avail, len(self.carts) - used, len(bright_carts))
             n = bright_slots - avail
             if n <= 0:
                 print("THIS SHOULDN'T HAPPEN")
@@ -592,16 +606,88 @@ class Scheduler(object):
             bright_slots_short = bright_slots
             bright_slots_long = 0
 
+        # print(slots, "||", bright_slots_short, bright_slots_long, dark_slots, rm_slots)
+
         gg_len = [self.gg_time + self.overhead for i in range(bright_slots_short)]
         long_bright =[self.apogee_time + self.overhead for i in range(bright_slots_long)]
         dark_lengths = [self.aqm_time + self.overhead for i in range(dark_slots)]
-        rm_lengths = [self.rm_time for i in range(rm_slots)]
+        rm_lengths = [self.rm_time / 2 for i in range(rm_slots)]
 
         all_lengths = np.sum(gg_len) + np.sum(long_bright) + np.sum(dark_lengths) + np.sum(rm_lengths)
 
         waste = nightLength - all_lengths / 60 /24
 
         return night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste
+
+
+    def rmSlot(self, rm_fields, mjd):
+        if len(rm_fields) == 1:
+            return [rm_fields[0]]
+
+        first_obs = self.observable(rm_fields, mjd=mjd,
+                                    check_cadence=True, duration=60.)
+        second_obs = self.observable(rm_fields, mjd=mjd + (60+self.overhead) / 60 / 24,
+                                    check_cadence=True, duration=60.) \
+
+        if len(first_obs) == 0:
+            # make it really easy
+            first_obs = self.observable(rm_fields, mjd=mjd + 15 / 60 / 24,
+                                    check_cadence=True, duration=45.)
+        if len(first_obs) == 0:
+            first_plate = None
+        else:
+            first_plate = first_obs[np.where(first_obs["HA_MIN"] == np.min(first_obs["HA_MIN"]))]
+
+        if len(second_obs) == 0:
+            # make it really easy
+            second_obs = self.observable(rm_fields, mjd=mjd + (75+self.overhead) / 60 / 24,
+                                    check_cadence=True, duration=45.)
+        if len(second_obs) == 0:
+            second_plate = None
+        else:
+            second_plate = second_obs[np.where(second_obs["HA_MIN"] == np.min(second_obs["HA_MIN"]))]
+
+        assert first_plate != second_plate, "there were supposed to be 2+ distinct plates!"
+
+        # #############
+        # the above generally works, but there are frustrating numbers of "Nones" that can happen
+        # catch those and force schedule the adjacent plate as needed
+        # hopefully it's observable enough. If not, someone will hopefully tell me...
+        # #############
+
+        if first_plate is None:
+            # this all feels hacky but it is more human readable than the more "efficient" approach
+            ha_sort = np.sort(rm_fields["HA_MIN"])
+
+            # where is plate 2 in the list?
+            w_2 = np.where(ha_sort == second_plate["HA_MIN"])[0]
+            if w_2 == 0:
+                # shouldn't happen often but feasible
+                other_ha_idx = 1  # w_2 + 1
+            else:
+                # otherwise get the previous plate
+                other_ha_idx = w_2 - 1
+
+            first_idx = np.where(rm_fields["HA_MIN"] == ha_sort[other_ha_idx])
+            first_plate = rm_fields[first_idx]
+
+        if second_plate is None:
+            # this all feels hacky but it is more human readable than the more "efficient" approach
+            ha_sort = np.sort(rm_fields["HA_MIN"])
+
+            # where is plate 2 in the list?
+            w_1 = np.where(ha_sort == first_plate["HA_MIN"])[0]
+            if w_1 == len(ha_sort) - 1:
+                # shouldn't happen often but feasible
+                other_ha_idx = len(ha_sort) - 1
+            else:
+                # otherwise get the next one
+                other_ha_idx = w_1 + 1
+
+            second_idx = np.where(rm_fields["HA_MIN"] == ha_sort[other_ha_idx])
+            second_plate = rm_fields[second_idx]
+
+        return [first_plate, second_plate]
 
 
     def scheduleMjd(self, mjd):
@@ -716,42 +802,50 @@ class Scheduler(object):
                 if now + 15 / 60 / 24 >= night_sched["dark_end"]:
                     break
 
-                if rm_sched < len(rm_lengths):
+                if rm_sched < len(rm_lengths) and now + (self.rm_time) / 60 / 24 <= night_sched["dark_end"]:
+                    # we want to catch the first slot one of the plates fits in
+                    # obs windows on drilled over plates are still ~90 minutes
                     rm_obs = self.observable(self.plates[w_rm], mjd=now,
                                              check_cadence=True, duration=60.)
                 else:
                     rm_obs = []
                 rm_this = False
+
                 if len(rm_obs) > 0:
-                    slot_priorities = self.prioritize(rm_obs)
+                    rm_field = np.unique(rm_obs["FIELD"])
 
-                    sorted_priorities = np.argsort(slot_priorities)[::-1]
-                    i = 0
-                    if len(sorted_priorities) > 0:
-                        while rm_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
-                            i += 1
-                            if i >= len(sorted_priorities) - 1:
-                                # g-e for case of len(sorted_priorities) == 1
-                                i = -1
-                                break
-                        if i != -1:
-                            this_plate = rm_obs[sorted_priorities[i]]
+                    # losing count of lazy assertion errors but better safe than sorry!
+                    assert len(rm_field) == 1, "trying to schedule multiple RM fields in single slot"
 
-                            tonight_ids.append(this_plate["PLATE_ID"])
+                    rm_fields = self.plates[self.plates["FIELD"] == rm_field]
+                    rm_plates = self.rmSlot(rm_fields, now)
+
+                    rm_this = True
+
+                    for p in rm_plates:
+                        if p is None:
+                            dark_starts.append({"obsmjd": now,
+                                            "exposure_length": self.rm_time / 2,
+                                            "plate": -1,
+                                            "cart": None
+                                })
+                            now += self.rm_time / 2 / 60 / 24
+                            rm_sched += 1
+                        else:
 
                             alt, az = self.Observer.radec2altaz(mjd=now,
-                                                            ra=this_plate["RA"],
-                                                            dec=this_plate["DEC"])
-                            exp_time = darkExpTime(alt, default=self.rm_time)
+                                                            ra=p["RA"],
+                                                            dec=p["DEC"])
+                            exp_time = darkExpTime(alt, default=self.rm_time / 2)
 
                             dark_starts.append({"obsmjd": now,
                                                 "exposure_length": exp_time,
-                                                "plate": this_plate["PLATE_ID"],
+                                                "plate": int(p["PLATE_ID"]),  # need to cast, don't know why
                                                 "cart": None
                                 })
-                            now += exp_time / 60 / 24
+                            now += (exp_time + self.overhead) / 60 / 24
                             rm_sched += 1
-                            rm_this = True
+
                 if not rm_this:
                     aqmes_obs = self.observable(self.plates[w_aqmes], mjd=now,
                                          check_cadence=True, duration=30.)
