@@ -328,18 +328,18 @@ class Scheduler(object):
         # if there are both APOGEE only and BOSS only, we need more loops
         # (assign bright apogee only, then dark boss only, then triage "both")
 
-        for s in bright_starts:
-            if s["cart"] is None and s["plate"] != -1:
-                for k, v in available.items():
-                    if v in ["BOTH", "APOGEE"]:
-                        s["cart"] = k
-                        del available[k]
-                        break
-
         for s in dark_starts:
             if s["cart"] is None and s["plate"] != -1:
                 for k, v in available.items():
                     if v in ["BOTH", "BOSS"]:
+                        s["cart"] = k
+                        del available[k]
+                        break
+
+        for s in bright_starts:
+            if s["cart"] is None and s["plate"] != -1:
+                for k, v in available.items():
+                    if v in ["BOTH", "APOGEE"]:
                         s["cart"] = k
                         del available[k]
                         break
@@ -506,8 +506,8 @@ class Scheduler(object):
             night_sched["bright_end"] = 0
             night_sched["dark_start"] = night_start
             night_sched["dark_end"] = night_end
-            remainder = nightLength - 2/24
-            rm_slots = 1
+            remainder = nightLength - (self.rm_time + self.overhead) / 60 / 24
+            rm_slots = 2
             dark_slots = int(remainder // dark_slot)
             extra = remainder % (dark_slots * dark_slot)
             if extra >= self.apogee_time / 60 / 24:
@@ -567,6 +567,13 @@ class Scheduler(object):
             elif extra >= self.gg_time / 60 / 24:
                 # ignore the overhead and add a GG plate
                 bright_slots += 1
+
+        dark_carts = [v["type"] for k, v in self.carts.items() if v["type"] in ["BOTH", "BOSS"]]
+        if dark_slots + rm_slots > len(dark_carts):
+            # take off a dark slot or two, never RM slot
+            d = dark_slots + rm_slots - len(dark_carts)
+            dark_slots = dark_slots - d
+
 
         slots = np.sum([bright_slots, dark_slots, rm_slots])
         # print(slots, "||", bright_slots, dark_slots, rm_slots)
