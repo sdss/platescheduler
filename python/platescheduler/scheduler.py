@@ -476,16 +476,23 @@ class Scheduler(object):
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
         """
-        night_start = self.Observer.evening_twilight(mjd)
-        night_end = self.Observer.morning_twilight(mjd)
+        night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
+        night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
         nightLength = night_end - night_start
         night_sched = {"start": night_start,
                        "end": night_end}
 
-        bright_start = bool(self.Observer.skybrightness(night_start + 1 / 24) >= 0.35)
-        bright_end = bool(self.Observer.skybrightness(night_end - 1 / 24) >= 0.35)
-        dark_start = bool(self.Observer.skybrightness(night_start + 1 / 24) < 0.35)
-        dark_end = bool(self.Observer.skybrightness(night_end - 1 / 24) < 0.35)
+        # for i in range(10):
+        #     delay = i*10 / 60 / 24
+        #     print("{:.2f}: {:.2f} {:.2f}".format(delay, float(self.Observer.skybrightness(night_start + delay)),
+        #                       float(self.Observer.moon_illumination(night_start + delay))))
+
+        # wait for dark twilight
+        dark_twi = 45 / 60 / 24
+        bright_start = bool(self.Observer.skybrightness(night_start + dark_twi) >= 0.35)
+        bright_end = bool(self.Observer.skybrightness(night_end - dark_twi) >= 0.35)
+        dark_start = bool(self.Observer.skybrightness(night_start + dark_twi) < 0.35)
+        dark_end = bool(self.Observer.skybrightness(night_end - dark_twi) < 0.35)
 
         short_slot = (self.gg_time + self.overhead) / 60 / 24  # 30 min GG size
         dark_slot = (self.aqm_time + self.overhead) / 60 / 24
@@ -617,6 +624,7 @@ class Scheduler(object):
             bright_slots_long = 0
 
         # print(slots, "||", bright_slots_short, bright_slots_long, dark_slots, rm_slots)
+        # print(night_sched)
 
         gg_len = [self.gg_time + self.overhead for i in range(bright_slots_short)]
         long_bright =[self.apogee_time + self.overhead for i in range(bright_slots_long)]
@@ -703,6 +711,9 @@ class Scheduler(object):
     def scheduleMjd(self, mjd):
         """Run the scheduling
         """
+
+        # this is for Petunia. *cries*
+        mjd = mjd +1
 
         self.pullCarts()
 
@@ -902,6 +913,13 @@ class Scheduler(object):
                         now += (self.aqm_time + self.overhead) / 60 / 24
 
         self.assignCarts(bright_starts, dark_starts)
+
+        for s in bright_starts + dark_starts:
+            s["obsmjd"] -= 1
+
+        for k in night_sched:
+            night_sched[k] -= 1
+
 
         return bright_starts, dark_starts, night_sched
 
