@@ -138,7 +138,13 @@ def get_plates(session):
         if survey_mode.lower() == "mwmlead":
             SKYBRIGHTNESS.append(1)
         else:
-            SKYBRIGHTNESS.append(0.35)
+            # ok this one is weird.
+            # sometimes a night starts with moon~0.345
+            # so it gets to ~0.351
+            # not a problem if the moon stays up
+            # but if the moon sets, the night starts dark, ends dark
+            # but with a blip. This prevents the blip and should never otherwise be relevant...
+            SKYBRIGHTNESS.append(0.37)
         CADENCE.append(p.design.designDictionary["cadence"])
         PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
@@ -396,6 +402,7 @@ class Scheduler(object):
         window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
 
         in_window = [True for p in plates]
+        # print(mjd)
 
         for i, p in enumerate(plates):
             start = (p["RA"] + p["HA_MIN"]) / 15.
@@ -411,7 +418,7 @@ class Scheduler(object):
             start_diff = float(lstDiff(start, window_lst_start))
             end_diff = float(lstDiff(end, window_lst_end))
 
-            # if p["PLATE_ID"] < 20003:
+            # if p["PLATE_ID"] == 15011:
             #     print("{:5d} {:.2f} {:.2f} {:.2f} {:.2f}".format(p["PLATE_ID"], float(window_lst_start), float(window_lst_end), float(start), float(end)))
 
             if start_diff < 0:
@@ -419,6 +426,9 @@ class Scheduler(object):
                 in_window[i] = False
             elif end_diff > 0:
                 in_window[i] = False
+
+            # if p["PLATE_ID"] == 15011:
+                # print(in_window[i])
 
         moonra, moondec = self.Observer.moon_radec(mjd)
 
@@ -433,7 +443,24 @@ class Scheduler(object):
         skybrightness = self.Observer.skybrightness(mjd + duration / 60 / 24 / 2)
 
         observable = (moon_dist > self.moon_threshold) & in_window\
-                     & (skybrightness <= plates["SKYBRIGHTNESS"])
+                      & (skybrightness <= plates["SKYBRIGHTNESS"])\
+                      & (plates["PRIORITY"] > 1)
+
+        # print("BRIGHT ", skybrightness)
+        # print(plates["SKYBRIGHTNESS"])
+
+        w_15011 = np.where(plates["PLATE_ID"] == 15011)[0]
+
+        # if w_15011:
+        #     print("WIN    ", in_window[w_15011])
+        #     print("moon   ", moon_dist[w_15011])
+        #     print("bright ", skybrightness, plates["SKYBRIGHTNESS"][w_15011])
+        #     print("prior  ", plates["PRIORITY"][w_15011])
+
+        # print("WIN    ", np.where(in_window))
+        # print("moon   ", np.where(moon_dist > self.moon_threshold))
+        # print("bright ", np.where(skybrightness <= plates["SKYBRIGHTNESS"]))
+        # print("prior  ", np.where(plates["PRIORITY"] > 1))
 
         if(check_cadence):
             for i, p in enumerate(plates):
@@ -476,23 +503,25 @@ class Scheduler(object):
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
         """
-        night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
-        night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+        night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-15)
+        night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-15)
         nightLength = night_end - night_start
         night_sched = {"start": night_start,
                        "end": night_end}
 
-        # for i in range(10):
+        # for i in range(20):
         #     delay = i*10 / 60 / 24
-        #     print("{:.2f}: {:.2f} {:.2f}".format(delay, float(self.Observer.skybrightness(night_start + delay)),
-        #                       float(self.Observer.moon_illumination(night_start + delay))))
+        #     print("{:.2f}: {:.2f} {:.2f} {:.2f}".format(delay, float(self.Observer.skybrightness(night_start + delay)),
+        #                       float(self.Observer.moon_illumination(night_start + delay)), 
+        #                       float(self.Observer._twilight_function(mjd=night_start + delay, twilight=-15))))
 
         # wait for dark twilight
-        dark_twi = 45 / 60 / 24
-        bright_start = bool(self.Observer.skybrightness(night_start + dark_twi) >= 0.35)
-        bright_end = bool(self.Observer.skybrightness(night_end - dark_twi) >= 0.35)
-        dark_start = bool(self.Observer.skybrightness(night_start + dark_twi) < 0.35)
-        dark_end = bool(self.Observer.skybrightness(night_end - dark_twi) < 0.35)
+        # fudge = 45 / 60 / 24
+        fudge = 15
+        bright_start = bool(self.Observer.skybrightness(night_start + fudge) >= 0.35)
+        bright_end = bool(self.Observer.skybrightness(night_end - fudge) >= 0.35)
+        dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
+        dark_end = bool(self.Observer.skybrightness(night_end - fudge) < 0.35)
 
         short_slot = (self.gg_time + self.overhead) / 60 / 24  # 30 min GG size
         dark_slot = (self.aqm_time + self.overhead) / 60 / 24
@@ -532,21 +561,32 @@ class Scheduler(object):
         elif dark_start and bright_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start + 1 / 24, night_end - 1 / 24,
+                              night_start, night_end,
                               args=self.dark_limit)
             bright_time = night_end - split
             dark_time = split - night_start
-            night_sched["bright_start"] = split
-            night_sched["bright_end"] = night_end
-            night_sched["dark_start"] = night_start
-            night_sched["dark_end"] = split
+            if bright_time < short_slot:
+                night_sched["bright_start"] = 0
+                night_sched["bright_end"] = 0
+                night_sched["dark_start"] = night_start
+                night_sched["dark_end"] = night_end
+            elif dark_time < dark_slot:
+                night_sched["bright_start"] = night_start
+                night_sched["bright_end"] = night_end
+                night_sched["dark_start"] = 0
+                night_sched["dark_end"] = 0
+            else:
+                night_sched["bright_start"] = split
+                night_sched["bright_end"] = night_end
+                night_sched["dark_start"] = night_start
+                night_sched["dark_end"] = split
 
         elif bright_start and dark_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start + 1 / 24, night_end - 1 / 24,
+                              night_start, night_end,
                               args=self.dark_limit)
-            bright_time = split - night_start 
+            bright_time = split - night_start
             dark_time = night_end - split
             night_sched["bright_start"] = night_start
             night_sched["bright_end"] = split
@@ -639,6 +679,7 @@ class Scheduler(object):
 
 
     def rmSlot(self, rm_fields, mjd):
+        rm_fields = rm_fields[rm_fields["PRIORITY"] > 1]
         if len(rm_fields) == 1:
             return [rm_fields[0]]
 
@@ -708,12 +749,12 @@ class Scheduler(object):
         return [first_plate, second_plate]
 
 
-    def scheduleMjd(self, mjd):
+    def scheduleMjd(self, petunia_mjd):
         """Run the scheduling
         """
 
         # this is for Petunia. *cries*
-        mjd = mjd +1
+        mjd = petunia_mjd +1
 
         self.pullCarts()
 
@@ -842,6 +883,7 @@ class Scheduler(object):
                     rm_plates = self.rmSlot(rm_fields, now)
 
                     rm_this = True
+                    rm_sched += 2
 
                     for p in rm_plates:
                         if p is None:
@@ -851,7 +893,7 @@ class Scheduler(object):
                                             "cart": None
                                 })
                             now += self.rm_time / 2 / 60 / 24
-                            rm_sched += 1
+
                         else:
 
                             alt, az = self.Observer.radec2altaz(mjd=now,
@@ -864,8 +906,7 @@ class Scheduler(object):
                                                 "plate": int(p["PLATE_ID"]),  # need to cast, don't know why
                                                 "cart": None
                                 })
-                            now += (exp_time + self.overhead) / 60 / 24
-                            rm_sched += 1
+                            now += (exp_time + self.overhead) / 60 / 24                    
 
                 if not rm_this:
                     aqmes_obs = self.observable(self.plates[w_aqmes], mjd=now,
@@ -873,6 +914,7 @@ class Scheduler(object):
                     slot_priorities = self.prioritize(aqmes_obs)
                     sorted_priorities = np.argsort(slot_priorities)[::-1]
                     i = 0
+                    # print(now, len(aqmes_obs))
                     if len(sorted_priorities) > 0:
                         while aqmes_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
                             i += 1
@@ -911,6 +953,7 @@ class Scheduler(object):
                                             "cart": -1
                         })
                         now += (self.aqm_time + self.overhead) / 60 / 24
+                    # print(dark_starts[-1])
 
         self.assignCarts(bright_starts, dark_starts)
 
