@@ -517,7 +517,7 @@ class Scheduler(object):
 
         # wait for dark twilight
         # fudge = 45 / 60 / 24
-        fudge = 15
+        fudge = 15 / 60 / 24
         bright_start = bool(self.Observer.skybrightness(night_start + fudge) >= 0.35)
         bright_end = bool(self.Observer.skybrightness(night_end - fudge) >= 0.35)
         dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
