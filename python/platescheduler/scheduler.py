@@ -503,6 +503,9 @@ class Scheduler(object):
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
         """
+
+        print(mjd)
+
         night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-15)
         night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-15)
         nightLength = night_end - night_start
@@ -561,7 +564,7 @@ class Scheduler(object):
         elif dark_start and bright_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start, night_end,
+                              night_start + fudge, night_end - fudge,
                               args=self.dark_limit)
             bright_time = night_end - split
             dark_time = split - night_start
@@ -584,14 +587,26 @@ class Scheduler(object):
         elif bright_start and dark_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
-                              night_start, night_end,
+                              night_start + fudge, night_end - fudge,
                               args=self.dark_limit)
             bright_time = split - night_start
             dark_time = night_end - split
-            night_sched["bright_start"] = night_start
-            night_sched["bright_end"] = split
-            night_sched["dark_start"] = split
-            night_sched["dark_end"] = night_end
+            if bright_time < short_slot:
+                night_sched["bright_start"] = 0
+                night_sched["bright_end"] = 0
+                night_sched["dark_start"] = night_start
+                night_sched["dark_end"] = night_end
+            elif dark_time < dark_slot:
+                night_sched["bright_start"] = night_start
+                night_sched["bright_end"] = night_end
+                night_sched["dark_start"] = 0
+                night_sched["dark_end"] = 0
+            else:
+                night_sched["bright_start"] = night_start
+                night_sched["bright_end"] = split
+                night_sched["dark_start"] = split
+                night_sched["dark_end"] = night_end
+
         else:
             raise Exception("You broke boolean algebra!")
 
