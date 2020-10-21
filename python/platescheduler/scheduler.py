@@ -398,11 +398,11 @@ class Scheduler(object):
         if len(plates) == 0:
             return []
 
-        window_lst_start = self.Observer.lst(mjd) / 15.
-        window_lst_end = self.Observer.lst(mjd + duration / 60 / 24) / 15.
+        window_lst_start = float(self.Observer.lst(mjd) / 15.)
+        window_lst_end = float(self.Observer.lst(mjd + duration / 60 / 24) / 15.)
 
         in_window = [True for p in plates]
-        # print(mjd)
+        # print("{:.2f} {} {:.2f} {:.2f}".format(mjd, len(plates), window_lst_start, window_lst_end))
 
         for i, p in enumerate(plates):
             start = (p["RA"] + p["HA_MIN"]) / 15.
@@ -427,8 +427,8 @@ class Scheduler(object):
             elif end_diff > 0:
                 in_window[i] = False
 
-            # if p["PLATE_ID"] == 15011:
-                # print(in_window[i])
+            if p["PLATE_ID"] == 15011:
+                print(in_window[i])
 
         moonra, moondec = self.Observer.moon_radec(mjd)
 
@@ -449,7 +449,7 @@ class Scheduler(object):
         # print("BRIGHT ", skybrightness)
         # print(plates["SKYBRIGHTNESS"])
 
-        w_15011 = np.where(plates["PLATE_ID"] == 15011)[0]
+        # w_15011 = np.where(plates["PLATE_ID"] == 15011)[0]
 
         # if w_15011:
         #     print("WIN    ", in_window[w_15011])
@@ -503,8 +503,6 @@ class Scheduler(object):
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
         """
-
-        print(mjd)
 
         night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-15)
         night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-15)
@@ -875,100 +873,73 @@ class Scheduler(object):
 
             rm_sched = 0
 
-            while len(dark_starts) < (len(rm_lengths) + len(dark_lengths)):
-                if now + 15 / 60 / 24 >= night_sched["dark_end"]:
-                    break
-
-                if rm_sched < len(rm_lengths) and now + (self.rm_time) / 60 / 24 <= night_sched["dark_end"]:
-                    # we want to catch the first slot one of the plates fits in
-                    # obs windows on drilled over plates are still ~90 minutes
-                    rm_obs = self.observable(self.plates[w_rm], mjd=now,
+            obs_aqm = list()
+            obs_rm = list()
+            for i in range(len(rm_lengths) + len(dark_lengths)):
+                rm_obs = self.observable(self.plates[w_rm], mjd=now,
                                              check_cadence=True, duration=60.)
-                else:
-                    rm_obs = []
-                rm_this = False
+                obs_rm.append(rm_obs)
+                aqm_obs = self.observable(self.plates[w_aqmes], mjd=now,
+                                             check_cadence=True, duration=60.)
+                obs_aqm.append(aqm_obs)
 
-                if len(rm_obs) > 0:
-                    rm_field = np.unique(rm_obs["FIELD"])
+                dark_starts.append({"obsmjd": now,
+                                    "exposure_length": self.aqm_time,
+                                    "plate": -1,
+                                    "cart": None
+                                    })
+                now += (self.aqm_time + self.overhead) / 60 / 24
 
-                    # losing count of lazy assertion errors but better safe than sorry!
-                    assert len(rm_field) == 1, "trying to schedule multiple RM fields in single slot"
+            # priority 10
+            for i in range(len(dark_starts)):
+                pri_9_check = np.where(obs_aqm[i]["PRIORITY"] > 9)[0]
+                if len(pri_9_check) > 0:
+                    assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
+                    this_plate = obs_aqm[i][pri_9_check]
+                    if this_plate["PLATE_ID"] in tonight_ids:
+                        continue
+                    dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
+                    tonight_ids.append(this_plate["PLATE_ID"])
 
-                    rm_fields = self.plates[self.plates["FIELD"] == rm_field]
-                    rm_plates = self.rmSlot(rm_fields, now)
-
-                    rm_this = True
-                    rm_sched += 2
-
-                    for p in rm_plates:
-                        if p is None:
-                            dark_starts.append({"obsmjd": now,
-                                            "exposure_length": self.rm_time / 2,
-                                            "plate": -1,
-                                            "cart": None
-                                })
-                            now += self.rm_time / 2 / 60 / 24
-
-                        else:
-
-                            alt, az = self.Observer.radec2altaz(mjd=now,
-                                                            ra=p["RA"],
-                                                            dec=p["DEC"])
-                            exp_time = darkExpTime(alt, default=self.rm_time / 2)
-
-                            dark_starts.append({"obsmjd": now,
-                                                "exposure_length": exp_time,
-                                                "plate": int(p["PLATE_ID"]),  # need to cast, don't know why
-                                                "cart": None
-                                })
-                            now += (exp_time + self.overhead) / 60 / 24                    
-
-                if not rm_this:
-                    aqmes_obs = self.observable(self.plates[w_aqmes], mjd=now,
-                                         check_cadence=True, duration=30.)
-                    slot_priorities = self.prioritize(aqmes_obs)
+            # then RM
+            for i in range(len(dark_starts)):
+                if dark_starts[i]["plate"] != -1:
+                    continue
+                if len(obs_rm[i]) > 0:
+                    slot_priorities = self.prioritize(obs_rm[i])
                     sorted_priorities = np.argsort(slot_priorities)[::-1]
-                    i = 0
-                    # print(now, len(aqmes_obs))
-                    if len(sorted_priorities) > 0:
-                        while aqmes_obs[sorted_priorities[i]]["PLATE_ID"] in tonight_ids:
-                            i += 1
-                            if i >= len(sorted_priorities) - 1:
-                                # g-e for case of len(sorted_priorities) == 1
-                                i = -1
-                                break
-                        if i == -1:
-                            dark_starts.append({"obsmjd": now,
-                                                "exposure_length": self.aqm_time,
-                                                "plate": -1,
-                                                "cart": -1
-                            })
-                            now += (self.aqm_time + self.overhead) / 60 / 24
-                        else:
-                            this_plate = aqmes_obs[sorted_priorities[i]]
+                    j = 0
+                    while obs_rm[i][sorted_priorities[j]]["PLATE_ID"] in tonight_ids:
+                        j += 1
+                        if j >= len(sorted_priorities) - 1:
+                            # g-e for case of len(sorted_priorities) == 1
+                            j = -1
+                            break
+                    if j == -1:
+                        continue
+                    this_plate = obs_rm[i][sorted_priorities[j]]
+                    dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
+                    tonight_ids.append(this_plate["PLATE_ID"])
 
-                            tonight_ids.append(this_plate["PLATE_ID"])
-
-                            alt, az = self.Observer.radec2altaz(mjd=now,
-                                                            ra=this_plate["RA"],
-                                                            dec=this_plate["DEC"])
-                            exp_time = darkExpTime(alt, default=self.aqm_time)
-
-                            dark_starts.append({"obsmjd": now,
-                                                "exposure_length": exp_time,
-                                                "plate": this_plate["PLATE_ID"],
-                                                "cart": None
-                                })
-                            now += (exp_time + self.overhead) / 60 / 24
-                    else:
-                        # everything else failed
-                        dark_starts.append({"obsmjd": now,
-                                            "exposure_length": self.aqm_time,
-                                            "plate": -1,
-                                            "cart": -1
-                        })
-                        now += (self.aqm_time + self.overhead) / 60 / 24
-                    # print(dark_starts[-1])
+            # now fill
+            for i in range(len(dark_starts)):
+                if dark_starts[i]["plate"] != -1:
+                    continue
+                if len(obs_aqm[i]) > 0:
+                    slot_priorities = self.prioritize(obs_aqm[i])
+                    sorted_priorities = np.argsort(slot_priorities)[::-1]
+                    j = 0
+                    while obs_aqm[i][sorted_priorities[j]]["PLATE_ID"] in tonight_ids:
+                        j += 1
+                        if j >= len(sorted_priorities) - 1:
+                            # g-e for case of len(sorted_priorities) == 1
+                            j = -1
+                            break
+                    if j == -1:
+                        continue
+                    this_plate = obs_aqm[i][sorted_priorities[j]]
+                    dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
+                    tonight_ids.append(this_plate["PLATE_ID"])
 
         self.assignCarts(bright_starts, dark_starts)
 
