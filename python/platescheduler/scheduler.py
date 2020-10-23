@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 import scipy.optimize as optimize
+# from astropy.time import Time
 # import fitsio # TEST
 
 import sqlalchemy
@@ -237,7 +238,6 @@ class Scheduler(object):
         self.gg_time = 33
         self.overhead = 20
 
-
     def pullPlates(self):
         """Read in plates for scheduling
 
@@ -255,20 +255,17 @@ class Scheduler(object):
             # self.obs_hist[p["FIELD"]] = []  # TEST
             # print("{pid:6d} {field:10s} {bright:5.2f}".format(pid=p["PLATE_ID"], field=p["FIELD"], bright=p["SKYBRIGHTNESS"]))
 
-
     @property
     def plates(self):
         if self._plates is None:
             self.pullPlates()
         return self._plates
 
-
     @property
     def cadences(self):
         if self._cadences is None:
             self.pullPlates()
         return self._cadences
-
 
     def pullCarts(self):
         """Get cart info
@@ -299,13 +296,11 @@ class Scheduler(object):
             self._carts[cart]["plate"] = plate
             self._plugged_plates.append(int(plate))
 
-
     @property
     def carts(self):
         if self._carts is None:
             self.pullCarts()
         return self._carts
-
 
     def assignCarts(self, bright_starts, dark_starts):
         """
@@ -359,10 +354,8 @@ class Scheduler(object):
                 #     print(s)
                 raise Exception("no cart assigned for {}".format(s["plate"]))
 
-
     def _inverseMoon(self, mjd):
         return -1 * self.Observer.moon_illumination(mjd)
-
 
     def last_full_moon(self, mjd):
         mjd = np.array([mjd])
@@ -376,7 +369,6 @@ class Scheduler(object):
             res = optimize.minimize(self._inverseMoon, mjd, bounds=[[mjd-27, mjd+1]])
         self._last_full_moon = float(res.x)
         return self._last_full_moon
-
 
     def observable(self, plates, mjd=None, check_cadence=True, duration=60.):
         """Return array of plates observable
@@ -471,7 +463,6 @@ class Scheduler(object):
 
         return plates[observable]
 
-
     def prioritize(self, plates):
         """prioritize observable plates
         """
@@ -492,13 +483,11 @@ class Scheduler(object):
 
         return dec
 
-
     def _bright_dark_function(self, mjd=None, switch=None):
         if switch is None:
             switch = self.dark_limit
 
         return self.Observer.skybrightness(mjd) - switch
-
 
     def makeSlots(self, mjd):
         """Determine observable slots based on plates and time
@@ -510,11 +499,15 @@ class Scheduler(object):
         night_sched = {"start": night_start,
                        "end": night_end}
 
+        # print("MJD!! ", mjd)
         # for i in range(20):
-        #     delay = i*10 / 60 / 24
-        #     print("{:.2f}: {:.2f} {:.2f} {:.2f}".format(delay, float(self.Observer.skybrightness(night_start + delay)),
-        #                       float(self.Observer.moon_illumination(night_start + delay)), 
-        #                       float(self.Observer._twilight_function(mjd=night_start + delay, twilight=-15))))
+        #     delay = i*30 / 60 / 24
+        #     startTime = Time(night_start + delay, format="mjd").datetime
+        #     tstring = "{} {} {}".format(startTime.day, startTime.hour, startTime.minute)
+        #     malt, maz = self.Observer.moon_altaz(night_start + delay)
+        #     print("{}: {:+6.2f} {:.2f} {:.2f}".format(tstring, float(malt),
+        #                       float(self.Observer.moon_illumination(night_start + delay)),
+        #                       float(self._bright_dark_function(mjd=night_start + delay))))
 
         # wait for dark twilight
         # fudge = 45 / 60 / 24
@@ -634,7 +627,6 @@ class Scheduler(object):
             d = dark_slots + rm_slots - len(dark_carts)
             dark_slots = dark_slots - d
 
-
         slots = np.sum([bright_slots, dark_slots, rm_slots])
         # print(slots, "||", bright_slots, dark_slots, rm_slots)
         bright_carts = [v["type"] for k, v in self.carts.items() if v["type"] in ["BOTH", "APOGEE"]]
@@ -690,7 +682,6 @@ class Scheduler(object):
 
         return night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste
 
-
     def rmSlot(self, rm_fields, mjd):
         rm_fields = rm_fields[rm_fields["PRIORITY"] > 1]
         if len(rm_fields) == 1:
@@ -699,12 +690,12 @@ class Scheduler(object):
         first_obs = self.observable(rm_fields, mjd=mjd,
                                     check_cadence=True, duration=60.)
         second_obs = self.observable(rm_fields, mjd=mjd + (60+self.overhead) / 60 / 24,
-                                    check_cadence=True, duration=60.) \
+                                     check_cadence=True, duration=60.) \
 
         if len(first_obs) == 0:
             # make it really easy
             first_obs = self.observable(rm_fields, mjd=mjd + 15 / 60 / 24,
-                                    check_cadence=True, duration=45.)
+                                        check_cadence=True, duration=45.)
         if len(first_obs) == 0:
             first_plate = None
         else:
@@ -713,7 +704,7 @@ class Scheduler(object):
         if len(second_obs) == 0:
             # make it really easy
             second_obs = self.observable(rm_fields, mjd=mjd + (75+self.overhead) / 60 / 24,
-                                    check_cadence=True, duration=45.)
+                                         check_cadence=True, duration=45.)
         if len(second_obs) == 0:
             second_plate = None
         else:
@@ -761,25 +752,21 @@ class Scheduler(object):
 
         return [first_plate, second_plate]
 
-
-    def scheduleMjd(self, petunia_mjd):
+    def scheduleMjd(self, mjd):
         """Run the scheduling
         """
-
-        # this is for Petunia. *cries*
-        mjd = petunia_mjd +1
 
         self.pullCarts()
 
         night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste = \
-                                                          self.makeSlots(mjd)
+            self.makeSlots(mjd)
 
         bright_starts = list()
         dark_starts = list()
         tonight_ids = list()
         if night_sched["bright_start"] > 0:
             w_gg = np.where([c == "GG" for c in self.plates["CADENCE"]])
-            w_bright_long = np.where([c in self.bright_cadences for c in \
+            w_bright_long = np.where([c in self.bright_cadences for c in
                                       self.plates["CADENCE"]])
             gg_sched = 0
 
@@ -942,13 +929,6 @@ class Scheduler(object):
                     tonight_ids.append(this_plate["PLATE_ID"])
 
         self.assignCarts(bright_starts, dark_starts)
-
-        for s in bright_starts + dark_starts:
-            s["obsmjd"] -= 1
-
-        for k in night_sched:
-            night_sched[k] -= 1
-
 
         return bright_starts, dark_starts, night_sched
 
