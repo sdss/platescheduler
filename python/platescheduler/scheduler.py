@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 from time import time
 import os
+from collections import defaultdict
 
 import numpy as np
 import scipy.optimize as optimize
@@ -25,6 +26,15 @@ except:
 
 from .roboscheduler import Observer
 from .cadence import assignCadence
+
+sn_reqs = {"RM": {"r1": 40, "b1": 18},
+           "AQMES-Medium": {"r1": 20, "b1": 10},
+           "AQMES-Wide": {"r1": 20, "b1": 10},
+           "eFEDS": {"r1": 40, "b1": 20}}
+
+def rb_dict():
+    # we're abusing the ddict default_factory
+    return {"r1": 0, "b1": 0}
 
 
 def get_plates(session):
@@ -101,7 +111,10 @@ def get_plates(session):
         elif not e.snr and e.snr_standard > 10:
             plate_exps[int(e.plate_id)].append(mjd)
 
-    field_exp_hist = dict()
+    field_exp_hist = defaultdict(list)
+    mwm_field_hist = defaultdict(list)
+    # field dict of mjd dict
+    bhm_field_hist = defaultdict(lambda: defaultdict(rb_dict))
 
     PLATE_ID = list()
     FIELD = list()
@@ -114,6 +127,8 @@ def get_plates(session):
     CADENCE = list()
     PRIORITY = list()
 
+    field_to_cadence = dict()
+
     for p in plate_query:
         if "cadence" not in p.design.designDictionary:
             # print("skipping: ", p.plate_id)
@@ -125,12 +140,8 @@ def get_plates(session):
         survey_mode = p.currentSurveyMode.definition_label
         field = str(p.name)
 
-        # print(p.plate_id, survey_mode)
-
         PLATE_ID.append(int(p.plate_id))
         FIELD.append(field)
-        if not field in field_exp_hist:
-            field_exp_hist[field] = list()
         RA.append(float(p.firstPointing.center_ra))
         DEC.append(float(p.firstPointing.center_dec))
         HA.append(float(p.firstPointing.platePointing(p.plate_id).hour_angle))
@@ -149,6 +160,8 @@ def get_plates(session):
         CADENCE.append(p.design.designDictionary["cadence"])
         PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
+        field_to_cadence[FIELD[-1]] = CADENCE[-1]
+
         if survey_mode.lower() == "mwmlead":
             plate_mjds = np.array(plate_exps[PLATE_ID[-1]])
             mjds = np.unique(plate_mjds)
@@ -156,12 +169,30 @@ def get_plates(session):
                 day = np.where(plate_mjds)
                 if len(day[0]) > 1:
                     # assume 2 exps count for a AB pair
-                    field_exp_hist[field].append(m)
+                    # S/N checked elsewhere for now, so 1 maybe works?
+                    mwm_field_hist[field].append(m)
         else:
             for plug in p.pluggings:
-                for s in plug.scienceExposures():
-                    if "good" in s.status.label.lower():
-                        field_exp_hist[field].append(s.mjd)
+                for o in plug.observations:
+                    bhm_field_hist[field][int(o.mjd)]["r1"] += o.sumOfCamera("r1")
+                    bhm_field_hist[field][int(o.mjd)]["b1"] += o.sumOfCamera("b1")
+
+        # for k, v in bhm_field_hist[field].items():
+        #     print("!", field, PLATE_ID[-1], k, v)
+
+    for f, mjd_dict in bhm_field_hist.items():
+        for m, sn_dict in mjd_dict.items():
+            tonight_b1 = sn_dict["b1"]
+            tonight_r1 = sn_dict["r1"]
+            if mjd_dict[m-1]:
+                tonight_b1 += mjd_dict[m-1]["b1"]
+                tonight_r1 += mjd_dict[m-1]["r1"]
+            if tonight_b1 > sn_reqs[field_to_cadence[f]]["b1"] \
+               and tonight_r1 > sn_reqs[field_to_cadence[f]]["r1"]:
+                field_exp_hist[f].append(m)
+            # else:
+            #     print(f, m, sn_dict["r1"], sn_dict["b1"])
+            #     print(sn_reqs[field_to_cadence[f]])
 
     # hist = dict()
     # for p, f in zip(PLATE_ID, FIELD):
@@ -253,7 +284,8 @@ class Scheduler(object):
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
             self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
             # self.obs_hist[p["FIELD"]] = []  # TEST
-            # print("{pid:6d} {field:10s} {bright:5.2f}".format(pid=p["PLATE_ID"], field=p["FIELD"], bright=p["SKYBRIGHTNESS"]))
+            print("{pid:6d} {field:10s} {hist}".format(pid=p["PLATE_ID"],
+                  field=p["FIELD"], hist=self.obs_hist[p["FIELD"]]))
 
     @property
     def plates(self):
