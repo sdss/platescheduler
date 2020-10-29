@@ -30,7 +30,7 @@ def plotWindow(plate_dict, sched, slots, ax):
 
 
 def monthSim(seed=1):
-    sched = Scheduler()
+    sched = Scheduler(session=1)
     plate_to_cadence = {p["PLATE_ID"]: p["CADENCE"] for p in sched.plates}
     plate_to_cadence[-1] = "FAIL_CAD"
 
@@ -87,7 +87,7 @@ def monthSim(seed=1):
     #             print("WEATHER", b["obsmjd"])
                 weather_lost.append(b)
                 continue
-            if b["plate"] is None:
+            if b["plate"] is None or b["plate"] == -1:
 #                 print(f"NO bright PLATE {float(sched.Observer.lst(b['start']))/15:5.1f} {b['start']:9.3f}")
                 lst = float(sched.Observer.lst(b['obsmjd']))/15
                 no_plate["bright"].append(lst)
@@ -112,7 +112,7 @@ def monthSim(seed=1):
     #             print("WEATHER", b["obsmjd"])
                 weather_lost.append(b)
                 continue
-            if b["plate"] is None:
+            if b["plate"] is None or b["plate"] == -1:
                 print("NO  dark  PLATE {0:5.1f} {1:9.3f}".format(float(sched.Observer.lst(b['obsmjd']))/15, b['obsmjd']))
                 lst = float(sched.Observer.lst(b['obsmjd']))/15
                 no_plate["dark"].append(lst)
@@ -206,9 +206,9 @@ def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist, seed=1):
 
 
 if __name__ == "__main__":
-    # for i in range(5):
-    #     args = monthSim(seed=i)
-    #     plotMonth(*args, seed=i)
+    for i in range(5):
+        args = monthSim(seed=i)
+        plotMonth(*args, seed=i)
 
     seed = 0
     args = monthSim(seed=seed)

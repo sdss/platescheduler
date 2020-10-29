@@ -8,21 +8,21 @@ from collections import defaultdict
 import numpy as np
 import scipy.optimize as optimize
 # from astropy.time import Time
-# import fitsio # TEST
+import fitsio # TEST
 
 import sqlalchemy
 from sqlalchemy import or_
 
 import yaml
 
-try:
-    from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
-    from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
-except:
-    # need the plate connection
-    from petunia.plateDBtools.database.connections.MyLocalConnection import db
-    from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
-    from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
+# try:
+#     from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
+#     from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
+# except:
+#     # need the plate connection
+#     from petunia.plateDBtools.database.connections.MyLocalConnection import db
+#     from petunia.plateDBtools.database.apo.platedb import ModelClasses as pdb
+#     from petunia.plateDBtools.database.apo.apogeeqldb import ModelClasses as qldb
 
 from .roboscheduler import Observer
 from .cadence import assignCadence
@@ -275,17 +275,19 @@ class Scheduler(object):
         For now this is a fits file, needs to be DB query soon
         """
 
-        # self._plates = fitsio.read(platePath) # TEST
+        platePath="/Users/jdonor/software/sdss/five_plates/nov_plates.fits"
+        self.obs_hist = dict()
+        self._plates = fitsio.read(platePath) # TEST
         self._plateIDtoField = dict()
-        self._plates, self.obs_hist = get_plates(self.session)
+        # self._plates, self.obs_hist = get_plates(self.session)
 
         for p in self._plates:
             if not p["CADENCE"] in self._cadences:
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
             self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
-            # self.obs_hist[p["FIELD"]] = []  # TEST
-            print("{pid:6d} {field:10s} {hist}".format(pid=p["PLATE_ID"],
-                  field=p["FIELD"], hist=self.obs_hist[p["FIELD"]]))
+            self.obs_hist[p["FIELD"]] = []  # TEST
+            # print("{pid:6d} {field:10s} {hist}".format(pid=p["PLATE_ID"],
+            #       field=p["FIELD"], hist=self.obs_hist[p["FIELD"]]))
 
     @property
     def plates(self):
@@ -318,6 +320,8 @@ class Scheduler(object):
         # }
 
         self._carts = yaml.load(open(os.path.expanduser("~/.cart_status.yml")))
+
+        return # TEST
 
         currentplug = self.session.query(pdb.Cartridge.number, pdb.Plate.plate_id)\
                                 .join(pdb.Plugging).join(pdb.Plate).join(pdb.ActivePlugging)\
@@ -451,8 +455,8 @@ class Scheduler(object):
             elif end_diff > 0:
                 in_window[i] = False
 
-            if p["PLATE_ID"] == 15011:
-                print(in_window[i])
+            # if p["PLATE_ID"] == 15011:
+            #     print(in_window[i])
 
         moonra, moondec = self.Observer.moon_radec(mjd)
 
@@ -653,6 +657,7 @@ class Scheduler(object):
                 # ignore the overhead and add a GG plate
                 bright_slots += 1
 
+        # print(self._carts)
         dark_carts = [v["type"] for k, v in self.carts.items() if v["type"] in ["BOTH", "BOSS"]]
         if dark_slots + rm_slots > len(dark_carts):
             # take off a dark slot or two, never RM slot
@@ -787,8 +792,6 @@ class Scheduler(object):
     def scheduleMjd(self, mjd):
         """Run the scheduling
         """
-
-        self.pullCarts()
 
         night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste = \
             self.makeSlots(mjd)
