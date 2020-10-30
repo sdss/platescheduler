@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+from collections import defaultdict
+
 import numpy as np
 import matplotlib.pyplot as plt
 import fitsio
@@ -201,8 +203,16 @@ def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist, seed=1):
         plt.text(m%1 - 0.005, int(m)-0.05, "weather", fontsize=9)
         plt.plot([m%1, m%1 + o["len"]/60/24], [int(m), int(m)], linewidth=1, c="k", linestyle="--")
 
-    plt.savefig("oct_plate_proj_{seed}.pdf".format(seed=seed))
+    plt.savefig("nov_plate_proj_{seed}.pdf".format(seed=seed))
 
+    fields = defaultdict(list)
+    for o in full_hist:
+        fields[o["field"]].append(int(o["mjd"]))
+    with open("nov_sim_{}.dat".format(seed), "w") as outfile:
+        for f, m in fields.items():
+            if f == "EMPTY":
+                continue
+            print("{f:18s} | {num:3d} | {mjds}".format(f=f, num=len(m), mjds=", ".join([str(i) for i in m])), file=outfile)
 
 
 if __name__ == "__main__":
