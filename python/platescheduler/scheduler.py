@@ -931,6 +931,7 @@ class Scheduler(object):
                     dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
                     tonight_ids.append(this_plate["PLATE_ID"])
 
+            rm_tonight = list()
             # then RM
             for i in range(len(dark_starts)):
                 if dark_starts[i]["plate"] != -1:
@@ -950,6 +951,14 @@ class Scheduler(object):
                     this_plate = obs_rm[i][sorted_priorities[j]]
                     dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
                     tonight_ids.append(this_plate["PLATE_ID"])
+                    rm_tonight.append(int(this_plate["PLATE_ID"]))
+
+            if len(rm_tonight) == 1:
+                remove_rm = rm_tonight[0]
+                for i in range(len(dark_starts)):
+                    if dark_starts[i]["plate"] == remove_rm:
+                        dark_starts[i]["plate"] = -1
+                tonight_ids.remove(np.int32(remove_rm))
 
             # now fill
             for i in range(len(dark_starts)):
