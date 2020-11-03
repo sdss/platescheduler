@@ -32,6 +32,7 @@ sn_reqs = {"RM": {"r1": 40, "b1": 18},
            "AQMES-Wide": {"r1": 20, "b1": 10},
            "eFEDS": {"r1": 40, "b1": 20}}
 
+
 def rb_dict():
     # we're abusing the ddict default_factory
     return {"r1": 0, "b1": 0}
@@ -284,8 +285,8 @@ class Scheduler(object):
                 self._cadences[p["CADENCE"]] = assignCadence(p["CADENCE"])
             self._plateIDtoField[p["PLATE_ID"]] = p["FIELD"]
             # self.obs_hist[p["FIELD"]] = []  # TEST
-            print("{pid:6d} {field:10s} {hist}".format(pid=p["PLATE_ID"],
-                  field=p["FIELD"], hist=self.obs_hist[p["FIELD"]]))
+            # print("{pid:6d} {field:10s} {hist}".format(pid=p["PLATE_ID"],
+            #       field=p["FIELD"], hist=self.obs_hist[p["FIELD"]]))
 
     @property
     def plates(self):
@@ -549,12 +550,14 @@ class Scheduler(object):
         dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
         dark_end = bool(self.Observer.skybrightness(night_end - fudge) < 0.35)
 
-        short_slot = (self.gg_time + self.overhead) / 60 / 24  # 30 min GG size
-        dark_slot = (self.aqm_time + self.overhead) / 60 / 24
+        short_slot = self.gg_time / 60 / 24  # 30 min GG size
+        dark_slot = self.aqm_time / 60 / 24
+
+        overhead_jd = self.overhead / 60 / 24
 
         split_night = False
         if bright_start and bright_end:
-            bright_slots = int(nightLength // short_slot)
+            bright_slots = int(nightLength // (short_slot + overhead_jd))
             rm_slots = 0
             dark_slots = 0
             night_sched["bright_start"] = night_start
@@ -570,8 +573,8 @@ class Scheduler(object):
             night_sched["dark_end"] = night_end
             remainder = nightLength - (self.rm_time + self.overhead) / 60 / 24
             rm_slots = 2
-            dark_slots = int(remainder // dark_slot)
-            extra = remainder % (dark_slots * dark_slot)
+            dark_slots = int(remainder // (dark_slot + overhead_jd))
+            extra = remainder % (dark_slots * (dark_slot + overhead_jd))
             if extra >= self.apogee_time / 60 / 24:
                 # we can ignore a second overhead on a full darknight
                 dark_slots += 1
@@ -634,7 +637,11 @@ class Scheduler(object):
             raise Exception("You broke boolean algebra!")
 
         if split_night:
-            bright_slots = int(bright_time // short_slot)
+            bright_slots = int(bright_time // (short_slot + overhead_jd))
+            if bright_time - (bright_slots * (short_slot + overhead_jd)
+               - overhead_jd) > short_slot:
+                # we can take overhead off at beginning or end
+                bright_slots += 1
             if dark_time > (self.rm_time + self.overhead) / 60 / 24:
                 # again assume the free overhead is for RM exposure
                 rm_slots = 2
@@ -643,15 +650,19 @@ class Scheduler(object):
                 dark_time = dark_time - (self.rm_time - self.overhead) / 60 / 24
             else:
                 rm_slots = 0
-            dark_slots = int(dark_time // dark_slot)
-
-            extra = dark_time % (dark_slots * dark_slot)
-            if extra >= self.apogee_time / 60 / 24 and rm_slots == 0:
-                # we can give this slot the free overhead
+            dark_slots = int(dark_time // (dark_slot + overhead_jd))
+            if dark_time - (dark_slots * (dark_time + overhead_jd)
+               - overhead_jd) > dark_time:
+                # we can take overhead off at beginning or end
                 dark_slots += 1
-            elif extra >= self.gg_time / 60 / 24:
-                # ignore the overhead and add a GG plate
-                bright_slots += 1
+
+            # extra = dark_time % (dark_slots * (dark_slot + overhead_jd))
+            # if extra >= self.aqm_time / 60 / 24 and rm_slots == 0:
+            #     # we can give this slot the free overhead
+            #     dark_slots += 1
+            # elif extra >= self.gg_time / 60 / 24:
+            #     # ignore the overhead and add a GG plate
+            #     bright_slots += 1
 
         dark_carts = [v["type"] for k, v in self.carts.items() if v["type"] in ["BOTH", "BOSS"]]
         if dark_slots + rm_slots > len(dark_carts):
@@ -704,7 +715,7 @@ class Scheduler(object):
         # print(night_sched)
 
         gg_len = [self.gg_time + self.overhead for i in range(bright_slots_short)]
-        long_bright =[self.apogee_time + self.overhead for i in range(bright_slots_long)]
+        long_bright = [self.apogee_time + self.overhead for i in range(bright_slots_long)]
         dark_lengths = [self.aqm_time + self.overhead for i in range(dark_slots)]
         rm_lengths = [self.rm_time / 2 for i in range(rm_slots)]
 
