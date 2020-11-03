@@ -907,7 +907,7 @@ class Scheduler(object):
             obs_rm = list()
             for i in range(len(rm_lengths) + len(dark_lengths)):
                 rm_obs = self.observable(self.plates[w_rm], mjd=now,
-                                             check_cadence=True, duration=60.)
+                                             check_cadence=True, duration=30.)
                 obs_rm.append(rm_obs)
                 aqm_obs = self.observable(self.plates[w_aqmes], mjd=now,
                                              check_cadence=True, duration=60.)
