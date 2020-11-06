@@ -8,10 +8,10 @@ from collections import defaultdict
 import numpy as np
 import scipy.optimize as optimize
 # from astropy.time import Time
-import fitsio # TEST
+import fitsio  # TEST
 
-import sqlalchemy
-from sqlalchemy import or_
+# import sqlalchemy  # TEST
+# from sqlalchemy import or_  # TEST
 
 import yaml
 
@@ -234,7 +234,7 @@ class Scheduler(object):
 
     """
 
-    def __init__(self, session=None, airmass_limit=2., dark_limit=0.35):
+    def __init__(self, session=None, platePath=None, airmass_limit=2., dark_limit=0.35):
         if session is None:
             try:
                 db
@@ -269,15 +269,17 @@ class Scheduler(object):
         self.gg_time = 33
         self.overhead = 20
 
+        # for sim only
+        self.platePath = platePath
+
     def pullPlates(self):
         """Read in plates for scheduling
 
         For now this is a fits file, needs to be DB query soon
         """
 
-        platePath="/Users/jdonor/software/sdss/five_plates/nov_plates.fits"
         self.obs_hist = dict()
-        self._plates = fitsio.read(platePath) # TEST
+        self._plates = fitsio.read(self.platePath)  # TEST
         self._plateIDtoField = dict()
         # self._plates, self.obs_hist = get_plates(self.session)
 
@@ -307,21 +309,22 @@ class Scheduler(object):
         For now hardcode, but this will need to get carts from DB soon
         """
 
-        # self._carts = {
-        #     1: {"type": "BOTH", "plate": 0},
-        #     2: {"type": "BOTH", "plate": 0},
-        #     3: {"type": "BOTH", "plate": 0},
-        #     4: {"type": "BOTH", "plate": 0},
-        #     5: {"type": "BOSS", "plate": 0},
-        #     6: {"type": "BOTH", "plate": 0},
-        #     7: {"type": "BOTH", "plate": 0},
-        #     8: {"type": "BOTH", "plate": 0},
-        #     9: {"type": "BOTH", "plate": 0},
-        # }
+        try:
+            self._carts = yaml.load(open(os.path.expanduser("~/.cart_status.yml")))
+        except:
+            self._carts = {
+                1: {"type": "BOTH", "plate": 0},
+                2: {"type": "BOTH", "plate": 0},
+                3: {"type": "BOTH", "plate": 0},
+                4: {"type": "APOGEE", "plate": 0},
+                5: {"type": "APOGEE", "plate": 0},
+                6: {"type": "APOGEE", "plate": 0},
+                7: {"type": "BOTH", "plate": 0},
+                8: {"type": "BOTH", "plate": 0},
+                9: {"type": "BOTH", "plate": 0},
+            }
 
-        self._carts = yaml.load(open(os.path.expanduser("~/.cart_status.yml")))
-
-        return # TEST
+        return  # TEST
 
         currentplug = self.session.query(pdb.Cartridge.number, pdb.Plate.plate_id)\
                                 .join(pdb.Plugging).join(pdb.Plate).join(pdb.ActivePlugging)\
@@ -382,7 +385,8 @@ class Scheduler(object):
                         break
 
         # print(self.carts)
-        # print(bright_starts + dark_starts)
+        # for s in bright_starts + dark_starts:
+        #     print(s)
 
         for s in bright_starts + dark_starts:
             if s["cart"] is None and s["plate"] != -1:
