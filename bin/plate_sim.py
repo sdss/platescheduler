@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 
+import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import fitsio
@@ -43,6 +44,10 @@ def monthSim(platePath=None, mjd=59135, histFile=None, seed=1):
     plate_dict = {p["PLATE_ID"]: p for p in sched.plates}
 
     sched._plateIDtoField[-1] = "FAIL"
+
+    if histFile is not None:
+        sched.obs_hist = yaml.load(open(histFile),
+                                   Loader=yaml.Loader)
 
     mjds = np.arange(mjd, mjd+30, 1)
 
@@ -263,5 +268,6 @@ if __name__ == "__main__":
         mjd = 59135
 
     for i in range(nIter):
-        args = monthSim(platePath=inputFile, mjd=mjd, histFile=histFile, seed=i)
+        args = monthSim(platePath=inputFile, mjd=mjd,
+                        histFile=histFile, seed=i)
         plotMonth(*args, name=name,  seed=i)
