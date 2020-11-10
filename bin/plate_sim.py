@@ -243,7 +243,7 @@ if __name__ == "__main__":
                         default=1)
     parser.add_argument("-m", "--mjd", dest="mjd", type=int,
                         required=False, help="mjd to start on",
-                        default=1)
+                        default=None)
 
     args = parser.parse_args()
     inputFile = args.file
