@@ -23,7 +23,7 @@ def parseLine(line):
     dec = float(els[2])
     ha = float(els[5])
     cadence = els[6].strip()
-    priority = int(els[7][:1])
+    priority = int(els[7][:1])//2
     return f"{field}, {ra}, {dec}, {ha}, {cadence}, {priority}"
 
 

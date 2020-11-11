@@ -498,10 +498,11 @@ class Scheduler(object):
         #     print("bright ", skybrightness, plates["SKYBRIGHTNESS"][w_15011])
         #     print("prior  ", plates["PRIORITY"][w_15011])
 
-        # print("WIN    ", np.where(in_window))
-        # print("moon   ", np.where(moon_dist > self.moon_threshold))
-        # print("bright ", np.where(skybrightness <= plates["SKYBRIGHTNESS"]))
-        # print("prior  ", np.where(plates["PRIORITY"] > 1))
+        # if "RM" in [p["CADENCE"] for p in plates]:
+        #     print("WIN    ", np.where(in_window))
+        #     print("moon   ", np.where(moon_dist > self.moon_threshold))
+        #     print("bright ", np.where(skybrightness <= plates["SKYBRIGHTNESS"]))
+        #     print("prior  ", np.where(plates["PRIORITY"] > 1))
 
         if(check_cadence):
             for i, p in enumerate(plates):
@@ -591,7 +592,7 @@ class Scheduler(object):
             rm_slots = 2
             dark_slots = int(remainder // (dark_slot + overhead_jd))
             extra = remainder % (dark_slots * (dark_slot + overhead_jd))
-            if extra >= self.apogee_time / 60 / 24:
+            if extra >= self.aqm_time / 60 / 24:
                 # we can ignore a second overhead on a full darknight
                 dark_slots += 1
             bright_slots = 0
@@ -869,6 +870,7 @@ class Scheduler(object):
             for i in range(len(dark_starts)):
                 pri_9_check = np.where(obs_aqm[i]["PRIORITY"] > 9)[0]
                 if len(pri_9_check) > 0:
+                    print("10!", obs_aqm[i][pri_9_check])
                     assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
                     this_plate = obs_aqm[i][pri_9_check]
                     if this_plate["PLATE_ID"] in tonight_ids:

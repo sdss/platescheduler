@@ -192,7 +192,7 @@ def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist,
     for o in full_hist:
         cad = o["cadence"]
         if cad in ["GG", "YSO", "RV6", "RV12"]:
-            print(o)
+            # print(o)
             color = "r"
         elif cad == "RM":
             color = "grey"
@@ -202,7 +202,7 @@ def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist,
             color = "b"
         m = o["mjd"]
         plt.text(m%1 - 0.005, int(m)-0.1, o["field"][:10].replace("_", " "), fontsize=9)
-        plt.plot([m%1, m%1 + o["len"]/60/24 -20/60/24], [int(m), int(m)], linewidth=4, c=color)
+        plt.plot([m%1, m%1 + o["len"]/60/24], [int(m), int(m)], linewidth=4, c=color)
     #     print(f"{m:.3f}", o["len"], o["field"], o["plate"])
 
     for w in weather_lost:
