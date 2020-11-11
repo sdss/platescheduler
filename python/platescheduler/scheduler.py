@@ -273,7 +273,7 @@ class Scheduler(object):
         self._last_full_moon = None
 
         # exp  times
-        self.aqm_time = 60
+        self.aqm_time = 75
         self.rm_time = 120
         self.apogee_time = 67
         self.gg_time = 33
