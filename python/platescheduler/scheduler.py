@@ -105,6 +105,9 @@ def get_plates(session):
 
     plate_exps = {int(p): [] for p in exposedPlates}
 
+    q2Time = time()
+    print('[SQL]: exp query completed in {} s'.format(q2Time-q1Time))
+
     for e in exposures:
         mjd = int(e[0])  # sqlalchemy.func doesn't give an attribute
         if e.snr > 10:
@@ -181,6 +184,9 @@ def get_plates(session):
         # for k, v in bhm_field_hist[field].items():
         #     print("!", field, PLATE_ID[-1], k, v)
 
+    q3Time = time()
+    print('[PY]: plates sorted in {} s'.format(q3Time-q2Time))
+
     for f, mjd_dict in bhm_field_hist.items():
         for m, sn_dict in mjd_dict.items():
             tonight_b1 = sn_dict["b1"]
@@ -194,6 +200,9 @@ def get_plates(session):
             # else:
             #     print(f, m, sn_dict["r1"], sn_dict["b1"])
             #     print(sn_reqs[field_to_cadence[f]])
+
+    q4Time = time()
+    print('[PY]: obs hist in {} s'.format(q4Time-q3Time))
 
     # hist = dict()
     # for p, f in zip(PLATE_ID, FIELD):
@@ -510,7 +519,7 @@ class Scheduler(object):
         base = base + np.array(pri_ten) + np.array(plugged)
 
         # gaussian de-weight for easier plates
-        dec = base - 50.0 * np.power(np.exp(-1 * (plates["DEC"] - 33)), 2) / (2 * 20**2)
+        dec = base - 50.0 * np.exp(-1 * np.power(plates["DEC"] - 33, 2) / (2 * 20**2))
 
         # TO-DO: possibly add weight by some delta-times, passed from cadence check?
 
@@ -578,15 +587,15 @@ class Scheduler(object):
             if extra >= self.apogee_time / 60 / 24:
                 # we can ignore a second overhead on a full darknight
                 dark_slots += 1
-                bright_slots = 0
-            elif extra >= 30 / 60 / 24:
-                # ignore the overhead and add a GG plate
-                bright_slots = 1
-                night_sched["dark_end"] = night_end - 30 / 60 / 24
-                night_sched["bright_start"] = night_end - 30 / 60 / 24
-                night_sched["bright_end"] = night_end
-            else:
-                bright_slots = 0
+            bright_slots = 0
+            # elif extra >= 30 / 60 / 24:
+            #     # ignore the overhead and add a GG plate
+            #     bright_slots = 1
+            #     night_sched["dark_end"] = night_end - 30 / 60 / 24
+            #     night_sched["bright_start"] = night_end - 30 / 60 / 24
+            #     night_sched["bright_end"] = night_end
+            # else:
+            #     bright_slots = 0
         elif dark_start and bright_end:
             split_night = True
             split = optimize.brenth(self._bright_dark_function,
@@ -725,76 +734,6 @@ class Scheduler(object):
 
         return night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste
 
-    def rmSlot(self, rm_fields, mjd):
-        rm_fields = rm_fields[rm_fields["PRIORITY"] > 1]
-        if len(rm_fields) == 1:
-            return [rm_fields[0]]
-
-        first_obs = self.observable(rm_fields, mjd=mjd,
-                                    check_cadence=True, duration=60.)
-        second_obs = self.observable(rm_fields, mjd=mjd + (60+self.overhead) / 60 / 24,
-                                     check_cadence=True, duration=60.) \
-
-        if len(first_obs) == 0:
-            # make it really easy
-            first_obs = self.observable(rm_fields, mjd=mjd + 15 / 60 / 24,
-                                        check_cadence=True, duration=45.)
-        if len(first_obs) == 0:
-            first_plate = None
-        else:
-            first_plate = first_obs[np.where(first_obs["HA_MIN"] == np.min(first_obs["HA_MIN"]))]
-
-        if len(second_obs) == 0:
-            # make it really easy
-            second_obs = self.observable(rm_fields, mjd=mjd + (75+self.overhead) / 60 / 24,
-                                         check_cadence=True, duration=45.)
-        if len(second_obs) == 0:
-            second_plate = None
-        else:
-            second_plate = second_obs[np.where(second_obs["HA_MIN"] == np.min(second_obs["HA_MIN"]))]
-
-        assert first_plate != second_plate, "there were supposed to be 2+ distinct plates!"
-
-        # #############
-        # the above generally works, but there are frustrating numbers of "Nones" that can happen
-        # catch those and force schedule the adjacent plate as needed
-        # hopefully it's observable enough. If not, someone will hopefully tell me...
-        # #############
-
-        if first_plate is None:
-            # this all feels hacky but it is more human readable than the more "efficient" approach
-            ha_sort = np.sort(rm_fields["HA_MIN"])
-
-            # where is plate 2 in the list?
-            w_2 = np.where(ha_sort == second_plate["HA_MIN"])[0]
-            if w_2 == 0:
-                # shouldn't happen often but feasible
-                other_ha_idx = 1  # w_2 + 1
-            else:
-                # otherwise get the previous plate
-                other_ha_idx = w_2 - 1
-
-            first_idx = np.where(rm_fields["HA_MIN"] == ha_sort[other_ha_idx])
-            first_plate = rm_fields[first_idx]
-
-        if second_plate is None:
-            # this all feels hacky but it is more human readable than the more "efficient" approach
-            ha_sort = np.sort(rm_fields["HA_MIN"])
-
-            # where is plate 2 in the list?
-            w_1 = np.where(ha_sort == first_plate["HA_MIN"])[0]
-            if w_1 == len(ha_sort) - 1:
-                # shouldn't happen often but feasible
-                other_ha_idx = len(ha_sort) - 1
-            else:
-                # otherwise get the next one
-                other_ha_idx = w_1 + 1
-
-            second_idx = np.where(rm_fields["HA_MIN"] == ha_sort[other_ha_idx])
-            second_plate = rm_fields[second_idx]
-
-        return [first_plate, second_plate]
-
     def scheduleMjd(self, mjd):
         """Run the scheduling
         """
@@ -907,10 +846,10 @@ class Scheduler(object):
             obs_rm = list()
             for i in range(len(rm_lengths) + len(dark_lengths)):
                 rm_obs = self.observable(self.plates[w_rm], mjd=now,
-                                             check_cadence=True, duration=30.)
+                                         check_cadence=True, duration=30.)
                 obs_rm.append(rm_obs)
                 aqm_obs = self.observable(self.plates[w_aqmes], mjd=now,
-                                             check_cadence=True, duration=60.)
+                                          check_cadence=True, duration=60.)
                 obs_aqm.append(aqm_obs)
 
                 dark_starts.append({"obsmjd": now,
@@ -934,7 +873,7 @@ class Scheduler(object):
             rm_tonight = list()
             # then RM
             for i in range(len(dark_starts)):
-                if dark_starts[i]["plate"] != -1:
+                if dark_starts[i]["plate"] != -1 or len(rm_tonight) > 1:
                     continue
                 if len(obs_rm[i]) > 0:
                     slot_priorities = self.prioritize(obs_rm[i])
