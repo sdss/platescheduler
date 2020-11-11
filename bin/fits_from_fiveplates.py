@@ -92,6 +92,6 @@ if __name__ == "__main__":
     outPath = args.out
 
     if outPath is None:
-        outPath = "five_plats.fits"
+        outPath = "five_plates.fits"
 
     convert(root, outPath)
