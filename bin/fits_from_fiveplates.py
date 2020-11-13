@@ -24,10 +24,10 @@ def parseLine(line):
     ha = float(els[5])
     cadence = els[6].strip()
     priority = int(els[7][:1])//2
-    return f"{field}, {ra}, {dec}, {ha}, {cadence}, {priority}"
+    return f"{field:20s}, {ra:11.6f}, {dec:+12.6f}, {ha:+5.1f}, {cadence:13s}, {priority:2d}"
 
 
-def convert(platerun_root, outPath):
+def mkCsv(platerun_root):
     five_dirs = os.listdir(platerun_root)
     use_files = list()
     for d in five_dirs:
@@ -46,7 +46,18 @@ def convert(platerun_root, outPath):
                     continue
                 full_csv.append(parseLine(l))
 
-    plate_array = np.genfromtxt(full_csv, delimiter=",", dtype=None, names=True)
+    return full_csv
+
+
+def mkFits(csv, outPath):
+    """Creates and saves a fits file to output
+       using csv.
+
+       csv can be a path to a csv file or the
+       csv text created by mkCsv
+    """
+
+    plate_array = np.genfromtxt(csv, delimiter=",", dtype=None, names=True)
 
     plate_types = [("PLATE_ID", np.int32),
                    ("FIELD", np.dtype("a20")),
@@ -75,23 +86,48 @@ def convert(platerun_root, outPath):
     fitsio.write(outPath, plates, clobber=True)
 
 
+def writeFullCsv(platerun_root, csvPath):
+    csv = mkCsv(platerun_root)
+
+    with open(csvPath, "w") as outFile:
+        for l in csv:
+            print(l, file=outFile)
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog=os.path.basename(sys.argv[0]),
-        description='Create fiveplates plate fits input')
+        description="""Create fiveplates plate fits input or intermediate csv
+                       files.""")
 
     parser.add_argument("-r", "--root", dest="root", type=str,
-                        required=True, help="platescheduler root")
+                        required=False, help="platescheduler root",
+                        default=None)
+    parser.add_argument("-c", "--csv", dest="csv", type=str,
+                        required=False, help="csv file to use for input",
+                        default=None)
     parser.add_argument("-o", "--out", dest="out", type=str,
-                        required=False, help="output path",
+                        required=False, help="output path, WITHOUT file extension",
                         default=None)
 
     args = parser.parse_args()
     root = args.root
     outPath = args.out
+    csv = args.csv
 
     if outPath is None:
-        outPath = "five_plates.fits"
+        outPath = "five_plates"
 
-    convert(root, outPath)
+    fitsPath = outPath + ".fits"
+
+    if root is not None:
+        csvPath = outPath + ".csv"
+        writeFullCsv(root, csvPath)
+        mkFits(csvPath, fitsPath)
+    elif csv is not None:
+        mkFits(csv, fitsPath)
+    else:
+        print(" ERROR: incorrect usage. \n",
+              "You must specify five_plates root with -r \n",
+              "or an input csv file with -c")
