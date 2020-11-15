@@ -10,6 +10,7 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import fitsio
+from astropy.time import Time
 
 from platescheduler.scheduler import Scheduler
 from platescheduler.weather import Weather
@@ -22,7 +23,7 @@ def plotWindow(plate_dict, sched, slots, ax):
         ax.set_title(int(s["obsmjd"]))
         lst_s = sched.Observer.lst(s["obsmjd"])
         lst_e = sched.Observer.lst(s["obsmjd"] + s["obsmjd"] / 60 / 24)
-        ax.scatter([lst_s, lst_e], [i,i], c="r", marker="|")
+        ax.scatter([lst_s, lst_e], [i, i], c="r", marker="|")
 
         if s["plateid"] is None:
             continue
@@ -31,29 +32,18 @@ def plotWindow(plate_dict, sched, slots, ax):
         ax.scatter(p["RA"], i, marker="^", c="b")
         ax.axvline(360)
 
-#         print(i, s["plateid"],p["RA"]+p["HA_MIN"], p["RA"]+p["HA_MAX"], lst_s, lst_e, s["obsmjd"], p["CADENCE"])
+        # print(i, s["plateid"],p["RA"]+p["HA_MIN"], p["RA"]+p["HA_MAX"], lst_s, lst_e, s["obsmjd"], p["CADENCE"])
     return
 
 
-def monthSim(platePath=None, mjd=59135, histFile=None, seed=1):
-    sched = Scheduler(session=1, platePath=platePath)
+def monthSim(sched, weather, mjd_start=59135, mjd_end=59165):
     plate_to_cadence = {p["PLATE_ID"]: p["CADENCE"] for p in sched.plates}
     plate_to_cadence[-1] = "FAIL_CAD"
 
     # it's just easier
     plate_dict = {p["PLATE_ID"]: p for p in sched.plates}
 
-    sched._plateIDtoField[-1] = "FAIL"
-
-    if histFile is not None:
-        sched.obs_hist = yaml.load(open(histFile),
-                                   Loader=yaml.Loader)
-
-    mjds = np.arange(mjd, mjd+30, 1)
-
-    weather = Weather(mjd_start=mjd,
-                      mjd_end=mjds[-1],
-                      seed=seed, fclear=0.5)
+    mjds = np.arange(mjd_start, mjd_end, 1)
 
     night_scheds = list()
 
@@ -106,10 +96,10 @@ def monthSim(platePath=None, mjd=59135, histFile=None, seed=1):
                 cadence = plate_to_cadence[b["plate"]]
 
             full_hist.append({"plate": pid,
-                                     "field": field,
-                                     "cadence": cadence,
-                                     "mjd": b["obsmjd"],
-                                     "len": b["exposure_length"]})
+                              "field": field,
+                              "cadence": cadence,
+                              "mjd": b["obsmjd"],
+                              "len": b["exposure_length"]})
             if pid > 0:
                 sched.obs_hist[field].append(b["obsmjd"])
 
@@ -138,7 +128,7 @@ def monthSim(platePath=None, mjd=59135, histFile=None, seed=1):
             if pid > 0:
                 sched.obs_hist[field].append(b["obsmjd"])
 
-    return sched, night_scheds, weather_lost, no_plate, full_hist
+    return night_scheds, weather_lost, no_plate, full_hist
 
 
 def brightField(f):
@@ -159,8 +149,7 @@ def darkField(f):
         return False
 
 
-def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist,
-              name="oops", seed=1):
+def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist, name="oops", seed=1):
     field_to_ra = {p["FIELD"]: p["RA"] + p["HA"] for p in sched.plates}
 
     not_used = [f for f, o in sched.obs_hist.items() if len(o) == 0]
@@ -213,14 +202,43 @@ def plotMonth(sched, night_scheds, weather_lost, no_plate, full_hist,
 
     plt.savefig("{name}_plate_proj_{seed}.pdf".format(name=name, seed=seed))
 
-    fields = defaultdict(list)
-    for o in full_hist:
-        fields[o["field"]].append(int(o["mjd"]))
+
+def wrapForMonths(name="", platePath=None, mjd_start=59135, mjd_end=59165,
+                  histFile=None, seed=1):
+    sched = Scheduler(session=1, platePath=platePath)
+
+    # force plates to read in
+    sched.plates
+
+    sched._plateIDtoField[-1] = "FAIL"
+
+    if histFile is not None:
+        sched.obs_hist = yaml.load(open(histFile),
+                                   Loader=yaml.Loader)
+
+    weather = Weather(mjd_start=mjd_start,
+                      mjd_end=mjd_end,
+                      seed=seed, fclear=0.5)
+
+    months = (mjd_end-mjd_start) // 30
+    last_month = (mjd_end-mjd_start) - months * 30
+
+    mjd_now = mjd_start
+
+    for m in range(months):
+        name = "month_{}_".format(m) + name
+        args = monthSim(sched, weather, mjd_start=mjd_now, mjd_end=mjd_now+30)
+        plotMonth(sched, *args, name=name,  seed=i)
+        mjd_now += 30
+
+    if mjd_end > mjd_now:
+        name = "month_{}".format(months) + name
+        args = monthSim(sched, weather, mjd_start=mjd_now, mjd_end=mjd_end+1)
+        plotMonth(sched, *args, name=name,  seed=i)
+
     with open("{}_sim_{}.dat".format(name, seed), "w") as outfile:
-        for f, m in fields.items():
-            if f == "EMPTY":
-                continue
-            print("{f:18s} | {num:3d} | {mjds}".format(f=f, num=len(m), mjds=", ".join([str(i) for i in m])), file=outfile)
+        for f, m in sched.obs_hist.items():
+            print("{f:18s} | {num:3d} | {mjds}".format(f=f, num=len(m), mjds=", ".join([str(int(i)) for i in m])), file=outfile)
 
 
 if __name__ == "__main__":
@@ -241,8 +259,11 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--iter", dest="iter", type=int,
                         required=False, help="number of sims to run",
                         default=1)
-    parser.add_argument("-m", "--mjd", dest="mjd", type=int,
+    parser.add_argument("-s", "--start", dest="start", type=int,
                         required=False, help="mjd to start on",
+                        default=None)
+    parser.add_argument("-e", "--end", dest="end", type=int,
+                        required=False, help="mjd to end on",
                         default=None)
 
     args = parser.parse_args()
@@ -250,7 +271,8 @@ if __name__ == "__main__":
     histFile = args.prev
     nIter = args.iter
     name = args.name
-    mjd = args.mjd
+    start = args.start
+    end = args.end
 
     if inputFile is None:
         inputFile = os.getenv('FIVEPLATE_FITS_INPUT')
@@ -264,10 +286,14 @@ if __name__ == "__main__":
     if name is None:
         name = "forgot-to-name"
 
-    if mjd is None:
-        mjd = 59135
+    if start is None:
+        start = int(Time(Time.now(), format="mjd").value)
+
+    if end is None:
+        end = start + 30
+
+    assert end > start, "start must be before end!"
 
     for i in range(nIter):
-        args = monthSim(platePath=inputFile, mjd=mjd,
-                        histFile=histFile, seed=i)
-        plotMonth(*args, name=name,  seed=i)
+        wrapForMonths(name=name, platePath=inputFile, mjd_start=start, mjd_end=end,
+                      histFile=histFile, seed=i)
