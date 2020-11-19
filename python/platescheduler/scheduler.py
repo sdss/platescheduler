@@ -878,16 +878,26 @@ class Scheduler(object):
                     dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
                     tonight_ids.append(this_plate["PLATE_ID"])
 
-            rm_tonight = list()
+            rm_tonight = defaultdict(list)
+            do_next = None
             # then RM
             for i in range(len(dark_starts)):
-                if dark_starts[i]["plate"] != -1 or len(rm_tonight) > 1:
+                if dark_starts[i]["plate"] != -1:
                     continue
                 if len(obs_rm[i]) > 0:
-                    slot_priorities = self.prioritize(obs_rm[i])
+                    if do_next is not None:
+                        this_field = np.where([f == do_next for f in obs_rm[i]["FIELD"]])
+                        this_obs = obs_rm[i][this_field]
+                    else:
+                        done_fields = [f for f, l in rm_tonight.items() if len(l) > 1]
+                        elligible = np.where([f not in done_fields for f in obs_rm[i]["FIELD"]])
+                        this_obs = obs_rm[i][elligible]
+                    if len(this_obs) == 0:
+                        continue
+                    slot_priorities = self.prioritize(this_obs)
                     sorted_priorities = np.argsort(slot_priorities)[::-1]
                     j = 0
-                    while obs_rm[i][sorted_priorities[j]]["PLATE_ID"] in tonight_ids:
+                    while this_obs[sorted_priorities[j]]["PLATE_ID"] in tonight_ids:
                         j += 1
                         if j >= len(sorted_priorities) - 1:
                             # g-e for case of len(sorted_priorities) == 1
@@ -895,17 +905,25 @@ class Scheduler(object):
                             break
                     if j == -1:
                         continue
-                    this_plate = obs_rm[i][sorted_priorities[j]]
+                    this_plate = this_obs[sorted_priorities[j]]
                     dark_starts[i]["plate"] = int(this_plate["PLATE_ID"])
                     tonight_ids.append(this_plate["PLATE_ID"])
-                    rm_tonight.append(int(this_plate["PLATE_ID"]))
+                    field = this_plate["FIELD"]
+                    rm_tonight[field].append(int(this_plate["PLATE_ID"]))
+                    # same field plates back-to-back
+                    if do_next is None:
+                        do_next = field
+                    else:
+                        do_next = None
 
-            if len(rm_tonight) == 1:
-                remove_rm = rm_tonight[0]
-                for i in range(len(dark_starts)):
-                    if dark_starts[i]["plate"] == remove_rm:
-                        dark_starts[i]["plate"] = -1
-                tonight_ids.remove(np.int32(remove_rm))
+            for k, l in rm_tonight.items():
+                # l is list for each field
+                if len(l) == 1:
+                    remove_rm = l[0]
+                    for i in range(len(dark_starts)):
+                        if dark_starts[i]["plate"] == remove_rm:
+                            dark_starts[i]["plate"] = -1
+                    tonight_ids.remove(np.int32(remove_rm))
 
             # now fill
             for i in range(len(dark_starts)):
