@@ -103,7 +103,20 @@ def get_plates(session):
                 .filter(pdb.ExposureFlavor.label == 'Object')\
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
-    plate_exps = {int(p): [] for p in exposedPlates}
+    # grad all exposures, use reqs from modelClasses
+    boss_exps = session.query(pdb.CameraFrame.sn2, pdb.Plate.plate_id,
+                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3),
+                              pdb.Camera.label)\
+                .join(pdb.Exposure).join(pdb.Observation)\
+                .join(pdb.Plugging).join(pdb.Plate)\
+                .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
+                .filter(pdb.ExposureFlavor.label == 'Science')\
+                .filter(pdb.ExposureStatus.label == 'Good')\
+                .filter(pdb.CameraFrame.sn2 > 0.2)\
+                .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
+
+    apg_plate_exps = {int(p): [] for p in exposedPlates}
+    boss_plate_exps = {int(p): defaultdict(rb_dict) for p in exposedPlates}
 
     q2Time = time()
     print('[SQL]: exp query completed in {} s'.format(q2Time-q1Time))
@@ -111,9 +124,17 @@ def get_plates(session):
     for e in exposures:
         mjd = int(e[0])  # sqlalchemy.func doesn't give an attribute
         if e.snr > 10:
-            plate_exps[int(e.plate_id)].append(mjd)
+            apg_plate_exps[int(e.plate_id)].append(mjd)
         elif not e.snr and e.snr_standard > 10:
-            plate_exps[int(e.plate_id)].append(mjd)
+            apg_plate_exps[int(e.plate_id)].append(mjd)
+
+    for e in boss_exps:
+        mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
+
+        if e.label == "r1":
+            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += e.sn2
+        else:
+            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += e.sn2
 
     field_exp_hist = defaultdict(list)
     mwm_field_hist = defaultdict(list)
@@ -167,7 +188,7 @@ def get_plates(session):
         field_to_cadence[FIELD[-1]] = CADENCE[-1]
 
         if survey_mode.lower() == "mwmlead":
-            plate_mjds = np.array(plate_exps[PLATE_ID[-1]])
+            plate_mjds = np.array(apg_plate_exps[PLATE_ID[-1]])
             mjds = np.unique(plate_mjds)
             for m in mjds:
                 day = np.where(plate_mjds)
@@ -176,10 +197,10 @@ def get_plates(session):
                     # S/N checked elsewhere for now, so 1 maybe works?
                     mwm_field_hist[field].append(m)
         else:
-            for plug in p.pluggings:
-                for o in plug.observations:
-                    bhm_field_hist[field][int(o.mjd)]["r1"] += o.sumOfCamera("r1")
-                    bhm_field_hist[field][int(o.mjd)]["b1"] += o.sumOfCamera("b1")
+            for plate, days in boss_plate_exps.items():
+                for m, sn in days.items():
+                    bhm_field_hist[field][m]["r1"] += sn["r1"]
+                    bhm_field_hist[field][m]["b1"] += sn["b1"]
 
         # for k, v in bhm_field_hist[field].items():
         #     print("!", field, PLATE_ID[-1], k, v)
