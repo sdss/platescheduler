@@ -104,9 +104,8 @@ def get_plates(session):
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
     # grad all exposures, use reqs from modelClasses
-    boss_exps = session.query(pdb.CameraFrame.sn2, pdb.Plate.plate_id,
-                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3),
-                              pdb.Camera.label)\
+    boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
+                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
                 .join(pdb.Exposure).join(pdb.Observation)\
                 .join(pdb.Plugging).join(pdb.Plate)\
                 .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
@@ -130,11 +129,15 @@ def get_plates(session):
 
     for e in boss_exps:
         mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
-
-        if e.label == "r1":
-            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += e.sn2
+        exp = e[0]
+        if exp.camera.label == "r1":
+            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += exp.sn2
         else:
-            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += e.sn2
+            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += exp.sn2
+
+    # for p, ms in boss_plate_exps.items():
+    #     for m, sn in ms.items():
+    #         print(p, m, sn["r1"], sn["b1"])
 
     field_exp_hist = defaultdict(list)
     mwm_field_hist = defaultdict(list)
@@ -197,10 +200,9 @@ def get_plates(session):
                     # S/N checked elsewhere for now, so 1 maybe works?
                     mwm_field_hist[field].append(m)
         else:
-            for plate, days in boss_plate_exps.items():
-                for m, sn in days.items():
-                    bhm_field_hist[field][m]["r1"] += sn["r1"]
-                    bhm_field_hist[field][m]["b1"] += sn["b1"]
+            for m, sn in boss_plate_exps[PLATE_ID[-1]].items():
+                bhm_field_hist[field][m]["r1"] += sn["r1"]
+                bhm_field_hist[field][m]["b1"] += sn["b1"]
 
         # for k, v in bhm_field_hist[field].items():
         #     print("!", field, PLATE_ID[-1], k, v)
@@ -497,7 +499,7 @@ class Scheduler(object):
         # otherwise we'll lose dark programs
         skybrightness = self.Observer.skybrightness(mjd + duration / 60 / 24 / 2)
 
-        observable = (moon_dist > self.moon_threshold) & in_window\
+        observable = (moon_dist > self.moon_threshold**2) & in_window\
                       & (skybrightness <= plates["SKYBRIGHTNESS"])\
                       & (plates["PRIORITY"] > 1)
 
