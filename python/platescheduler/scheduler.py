@@ -565,12 +565,13 @@ class Scheduler(object):
                        "end": night_end}
 
         # print("MJD!! ", mjd)
+        # print("mm/dd hh/mm-> moonalt lum from_dark_lim")
         # for i in range(20):
         #     delay = i*30 / 60 / 24
         #     startTime = Time(night_start + delay, format="mjd").datetime
-        #     tstring = "{} {} {}".format(startTime.day, startTime.hour, startTime.minute)
+        #     tstring = "{:2d}/{:02d} {:2d}:{:02d}".format(startTime.month, startTime.day, startTime.hour, startTime.minute)
         #     malt, maz = self.Observer.moon_altaz(night_start + delay)
-        #     print("{}: {:+6.2f} {:.2f} {:.2f}".format(tstring, float(malt),
+        #     print("{}-> {:+06.2f} {:.2f} {:+.2f}".format(tstring, float(malt),
         #                       float(self.Observer.moon_illumination(night_start + delay)),
         #                       float(self._bright_dark_function(mjd=night_start + delay))))
 
@@ -754,6 +755,24 @@ class Scheduler(object):
         all_lengths = np.sum(gg_len) + np.sum(long_bright) + np.sum(dark_lengths) + np.sum(rm_lengths)
 
         waste = nightLength - all_lengths / 60 /24
+
+        try:
+            master = yaml.load(open(os.path.expanduser("~/.schedule_override.yml")))
+        except IOError:
+            master = {}
+
+        if mjd in master:
+            tonight = master[mjd]
+
+            night_sched["bright_start"] = tonight["bright_start"]
+            night_sched["bright_end"] = tonight["bright_end"]
+            night_sched["dark_start"] = tonight["dark_start"]
+            night_sched["dark_end"] = tonight["dark_end"]
+
+            dark_lengths = [self.aqm_time + self.overhead for i in range(tonight["dark_slots"])]
+            gg_len = [self.gg_time + self.overhead for i in range(tonight["gg_slots"])]
+            long_bright = [self.apogee_time + self.overhead for i in range(tonight["apg_slots"])]
+            rm_lengths = []
 
         return night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste
 
