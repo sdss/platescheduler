@@ -379,12 +379,14 @@ class Scheduler(object):
             if s["cart"] is None and s["plate"] != -1:
                 if s["plate"] in plugged:
                     s["cart"] = plugged[s["plate"]]
+                    # print("bright redo", s["cart"], s["plate"])
                     del available[plugged[s["plate"]]]
 
         for s in dark_starts:
             if s["cart"] is None and s["plate"] != -1:
                 if s["plate"] in plugged:
                     s["cart"] = plugged[s["plate"]]
+                    # print("dark redo", s["cart"], s["plate"])
                     del available[plugged[s["plate"]]]
 
 
@@ -399,6 +401,7 @@ class Scheduler(object):
                 for k, v in available.items():
                     if v in ["BOTH", "BOSS"]:
                         s["cart"] = k
+                        # print("dark", k, s["plate"])
                         del available[k]
                         break
 
@@ -407,8 +410,11 @@ class Scheduler(object):
                 for k, v in available.items():
                     if v in ["BOTH", "APOGEE"]:
                         s["cart"] = k
+                        # print("bright", k, s["plate"])
                         del available[k]
                         break
+
+        # print(available)
 
         # print(self.carts)
         # print(bright_starts + dark_starts)
@@ -417,7 +423,8 @@ class Scheduler(object):
             if s["cart"] is None and s["plate"] != -1:
                 # for s in bright_starts + dark_starts:
                 #     print(s)
-                raise Exception("no cart assigned for {}".format(s["plate"]))
+                # raise Exception("no cart assigned for {}".format(s["plate"]))
+                s["cart"] = -1
 
     def _inverseMoon(self, mjd):
         return -1 * self.Observer.moon_illumination(mjd)
