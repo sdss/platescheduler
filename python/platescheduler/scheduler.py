@@ -573,9 +573,6 @@ class Scheduler(object):
 
         night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-15)
         night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-15)
-        nightLength = night_end - night_start
-        night_sched = {"start": night_start,
-                       "end": night_end}
 
         # print("MJD!! ", mjd)
         # print("mm/dd hh/mm-> moonalt lum from_dark_lim")
@@ -595,6 +592,14 @@ class Scheduler(object):
         bright_end = bool(self.Observer.skybrightness(night_end - fudge) >= 0.35)
         dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
         dark_end = bool(self.Observer.skybrightness(night_end - fudge) < 0.35)
+
+        if bright_start:
+            night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
+        if bright_end:
+            night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
+        nightLength = night_end - night_start
+        night_sched = {"start": night_start,
+                       "end": night_end}
 
         short_slot = self.gg_time / 60 / 24  # 30 min GG size
         dark_slot = self.aqm_time / 60 / 24
