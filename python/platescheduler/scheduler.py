@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 from time import time
 import os
 from collections import defaultdict
+import warnings
 
 import numpy as np
 import scipy.optimize as optimize
@@ -357,7 +358,10 @@ class Scheduler(object):
                                 .order_by(pdb.Cartridge.number).all()
 
         for cart, plate in currentplug:
-            assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
+            # assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
+            if cart not in self._carts:
+                warnings.warn("CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart),
+                              UserWarning)
             self._carts[cart]["plate"] = plate
             self._plugged_plates.append(int(plate))
 
@@ -424,6 +428,8 @@ class Scheduler(object):
                 # for s in bright_starts + dark_starts:
                 #     print(s)
                 # raise Exception("no cart assigned for {}".format(s["plate"]))
+                warnings.warn("can't assign cart for {}".format(s["plate"]),
+                              UserWarning)
                 s["cart"] = -1
 
     def _inverseMoon(self, mjd):
@@ -912,7 +918,9 @@ class Scheduler(object):
             for i in range(len(dark_starts)):
                 pri_9_check = np.where(obs_aqm[i]["PRIORITY"] > 9)[0]
                 if len(pri_9_check) > 0:
-                    assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
+                    # assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
+                    warnings.warn("TOO MANY PRIORITY 10 PLATES",
+                                  UserWarning)
                     this_plate = obs_aqm[i][pri_9_check]
                     if this_plate["PLATE_ID"] in tonight_ids:
                         continue
