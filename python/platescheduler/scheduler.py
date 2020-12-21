@@ -104,7 +104,7 @@ def get_plates(session):
                 .filter(pdb.ExposureFlavor.label == 'Object')\
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
-    # grad all exposures, use reqs from modelClasses
+    # grab all exposures, use reqs from modelClasses
     boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
                               sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
                 .join(pdb.Exposure).join(pdb.Observation)\
@@ -141,7 +141,7 @@ def get_plates(session):
     #         print(p, m, sn["r1"], sn["b1"])
 
     field_exp_hist = defaultdict(list)
-    mwm_field_hist = defaultdict(list)
+    # mwm_field_hist = defaultdict(list)
     # field dict of mjd dict
     bhm_field_hist = defaultdict(lambda: defaultdict(rb_dict))
 
@@ -199,7 +199,7 @@ def get_plates(session):
                 if len(day[0]) > 1:
                     # assume 2 exps count for a AB pair
                     # S/N checked elsewhere for now, so 1 maybe works?
-                    mwm_field_hist[field].append(m)
+                    field_exp_hist[field].append(m)
         else:
             for m, sn in boss_plate_exps[PLATE_ID[-1]].items():
                 bhm_field_hist[field][m]["r1"] += sn["r1"]
