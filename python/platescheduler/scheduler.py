@@ -39,6 +39,31 @@ def rb_dict():
     return {"r1": 0, "b1": 0}
 
 
+def pull_boss_hist(session, exposedPlates):
+    boss_plate_exps = {int(p): defaultdict(rb_dict) for p in exposedPlates}
+
+    # grad all exposures, use reqs from modelClasses
+    boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
+                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
+                .join(pdb.Exposure).join(pdb.Observation)\
+                .join(pdb.Plugging).join(pdb.Plate)\
+                .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
+                .filter(pdb.ExposureFlavor.label == 'Science')\
+                .filter(pdb.ExposureStatus.label == 'Good')\
+                .filter(pdb.CameraFrame.sn2 > 0.2)\
+                .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
+
+    for e in boss_exps:
+        mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
+        exp = e[0]
+        if exp.camera.label == "r1":
+            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += exp.sn2
+        else:
+            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += exp.sn2
+
+    return boss_plate_exps
+
+
 def get_plates(session):
     '''DESCRIPTION: Reads in APOGEE-II plate information from platedb
     INPUT: None
@@ -104,19 +129,8 @@ def get_plates(session):
                 .filter(pdb.ExposureFlavor.label == 'Object')\
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
-    # grab all exposures, use reqs from modelClasses
-    boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
-                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
-                .join(pdb.Exposure).join(pdb.Observation)\
-                .join(pdb.Plugging).join(pdb.Plate)\
-                .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
-                .filter(pdb.ExposureFlavor.label == 'Science')\
-                .filter(pdb.ExposureStatus.label == 'Good')\
-                .filter(pdb.CameraFrame.sn2 > 0.2)\
-                .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
-
     apg_plate_exps = {int(p): [] for p in exposedPlates}
-    boss_plate_exps = {int(p): defaultdict(rb_dict) for p in exposedPlates}
+    boss_plate_exps = pull_boss_hist(session, exposedPlates)
 
     q2Time = time()
     print('[SQL]: exp query completed in {} s'.format(q2Time-q1Time))
@@ -127,14 +141,6 @@ def get_plates(session):
             apg_plate_exps[int(e.plate_id)].append(mjd)
         elif not e.snr and e.snr_standard > 10:
             apg_plate_exps[int(e.plate_id)].append(mjd)
-
-    for e in boss_exps:
-        mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
-        exp = e[0]
-        if exp.camera.label == "r1":
-            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += exp.sn2
-        else:
-            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += exp.sn2
 
     # for p, ms in boss_plate_exps.items():
     #     for m, sn in ms.items():
