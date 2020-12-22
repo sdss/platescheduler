@@ -130,6 +130,8 @@ def get_plates(session):
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
     apg_plate_exps = {int(p): [] for p in exposedPlates}
+    apg_plate_sn = {int(p): 0 for p in exposedPlates}
+
     boss_plate_exps = pull_boss_hist(session, exposedPlates)
 
     q2Time = time()
@@ -139,8 +141,10 @@ def get_plates(session):
         mjd = int(e[0])  # sqlalchemy.func doesn't give an attribute
         if e.snr > 10:
             apg_plate_exps[int(e.plate_id)].append(mjd)
+            apg_plate_sn[int(e.plate_id)] += e.snr**2
         elif not e.snr and e.snr_standard > 10:
             apg_plate_exps[int(e.plate_id)].append(mjd)
+            apg_plate_sn[int(e.plate_id)] += e.snr_standard**2
 
     # for p, ms in boss_plate_exps.items():
     #     for m, sn in ms.items():
@@ -161,6 +165,7 @@ def get_plates(session):
     SKYBRIGHTNESS = list()
     CADENCE = list()
     PRIORITY = list()
+    SN_TOT = list()
 
     field_to_cadence = dict()
 
@@ -195,6 +200,10 @@ def get_plates(session):
         CADENCE.append(p.design.designDictionary["cadence"])
         PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
+        if PLATE_ID[-1] in apg_plate_sn:
+            SN_TOT.append(apg_plate_sn[PLATE_ID[-1]])
+        else:
+            SN_TOT.append(np.nan)
         field_to_cadence[FIELD[-1]] = CADENCE[-1]
 
         if survey_mode.lower() == "mwmlead":
@@ -247,8 +256,8 @@ def get_plates(session):
                    ("HA_MAX", np.float64),
                    ("SKYBRIGHTNESS", np.float64),
                    ("CADENCE", np.dtype("a20")),
-                   ("PRIORITY", np.int32)]
-
+                   ("PRIORITY", np.int32),
+                   ("SN_TOT", np.float64)]
 
     plates = np.zeros(len(PLATE_ID), dtype=plate_types)
 
@@ -262,6 +271,7 @@ def get_plates(session):
     plates["SKYBRIGHTNESS"] = np.array(SKYBRIGHTNESS)
     plates["CADENCE"] = np.array(CADENCE)
     plates["PRIORITY"] = np.array(PRIORITY)
+    plates["SN_TOT"] = np.array(SN_TOT)
 
     buildTime = time()
     print('[PY]: array built in {} s'.format(buildTime - q1Time))
@@ -543,7 +553,10 @@ class Scheduler(object):
                 if observable[i] and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
-                    observable[i] = self.cadences[cad](mjd, hist=self.obs_hist[field], last_full_moon=self._last_full_moon)
+                    observable[i] = self.cadences[cad](mjd,
+                                                       hist=self.obs_hist[field],
+                                                       last_full_moon=self._last_full_moon,
+                                                       sn=p["SN_TOT"])
 
         return plates[observable]
 
@@ -607,14 +620,15 @@ class Scheduler(object):
         night_sched = {"start": night_start,
                        "end": night_end}
 
-        short_slot = self.gg_time / 60 / 24  # 30 min GG size
+        # short_slot = self.gg_time / 60 / 24  # 30 min GG size
         dark_slot = self.aqm_time / 60 / 24
+        bright_slot = self.apogee_time / 60 / 24
 
         overhead_jd = self.overhead / 60 / 24
 
         split_night = False
         if bright_start and bright_end:
-            bright_slots = int(nightLength // (short_slot + overhead_jd))
+            bright_slots = int(nightLength // (bright_slot + overhead_jd))
             rm_slots = 0
             dark_slots = 0
             night_sched["bright_start"] = night_start
@@ -651,7 +665,7 @@ class Scheduler(object):
                               args=self.dark_limit)
             bright_time = night_end - split
             dark_time = split - night_start
-            if bright_time < short_slot:
+            if bright_time < bright_slot:
                 night_sched["bright_start"] = 0
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
@@ -674,7 +688,7 @@ class Scheduler(object):
                               args=self.dark_limit)
             bright_time = split - night_start
             dark_time = night_end - split
-            if bright_time < short_slot:
+            if bright_time < bright_slot:
                 night_sched["bright_start"] = 0
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
@@ -694,9 +708,9 @@ class Scheduler(object):
             raise Exception("You broke boolean algebra!")
 
         if split_night:
-            bright_slots = int(bright_time // (short_slot + overhead_jd))
-            if bright_time - (bright_slots * (short_slot + overhead_jd)
-               - overhead_jd) > short_slot:
+            bright_slots = int(bright_time // (bright_slot + overhead_jd))
+            if bright_time - (bright_slots * (bright_slot + overhead_jd)
+               - overhead_jd) > bright_slot:
                 # we can take overhead off at beginning or end
                 bright_slots += 1
             if dark_time > (self.rm_time + self.overhead) / 60 / 24:
@@ -734,22 +748,12 @@ class Scheduler(object):
             used = dark_slots + rm_slots
             avail = min(len(self.carts) - used, len(bright_carts))
             # print(mjd, avail, len(self.carts) - used, len(bright_carts))
-            n = bright_slots - avail
-            if n <= 0:
-                print("THIS SHOULDN'T HAPPEN")
-                bright_slots_short = bright_slots
-                bright_slots_long = 0
-            else:
-                bright_slots_short = bright_slots - 2*n
-                bright_slots_long = n
-            if bright_slots_short < 0:
-                # this came up briefly in testing
-                bright_slots_short = 0
-            if bright_slots_long > avail:
-                # this also came up in testing with
-                # small number of carts, shouldn't happen in practice but...
-                bright_slots_long = avail
 
+            bright_slots_long = avail
+            bright_slots_short = 0
+        else:
+            bright_slots_long = bright_slots
+            bright_slots_short = 0
             bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
             bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
                                         - (self.apogee_time + self.overhead) * bright_slots_long
@@ -764,9 +768,40 @@ class Scheduler(object):
 
             assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
                     <= len(self.carts), "cart assignment made up extra carts!"
-        else:
-            bright_slots_short = bright_slots
-            bright_slots_long = 0
+
+        #     n = bright_slots - avail
+        #     if n <= 0:
+        #         print("THIS SHOULDN'T HAPPEN")
+        #         bright_slots_short = bright_slots
+        #         bright_slots_long = 0
+        #     else:
+        #         bright_slots_short = bright_slots - 2*n
+        #         bright_slots_long = n
+        #     if bright_slots_short < 0:
+        #         # this came up briefly in testing
+        #         bright_slots_short = 0
+        #     if bright_slots_long > avail:
+        #         # this also came up in testing with
+        #         # small number of carts, shouldn't happen in practice but...
+        #         bright_slots_long = avail
+
+        #     bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
+        #     bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+        #                                 - (self.apogee_time + self.overhead) * bright_slots_long
+        #     # print(f"waste:        {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+        #     while bright_waste > 37:
+        #         # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+        #         bright_slots_short -= 1
+        #         bright_slots_long += 1
+        #         bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+        #                                     - (self.apogee_time + self.overhead) * bright_slots_long
+        #         # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+
+        #     assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
+        #             <= len(self.carts), "cart assignment made up extra carts!"
+        # else:
+        #     bright_slots_short = bright_slots
+        #     bright_slots_long = 0
 
         # print(slots, "||", bright_slots_short, bright_slots_long, dark_slots, rm_slots)
         # print(night_sched)

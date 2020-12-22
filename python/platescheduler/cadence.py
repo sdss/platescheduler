@@ -47,7 +47,7 @@ def AQMESmedium(mjd, hist=[], **kwargs):
 
     deltas = np.array(hist) - last_full_moon
     this_month = np.where(deltas > 0)
-    
+
     # make sure it's been at least since last run
     return len(this_month[0]) == 0
 
@@ -62,7 +62,10 @@ def single(mjd, hist=[], **kwargs):
     hist: list, list of previous MJDs
     """
 
-    return len(hist) == 0
+    # return len(hist) == 0
+
+    sn = kwargs.get("sn", 0)
+    return sn >= 1600
 
 
 def yso(mjd, hist=[], **kwargs):
@@ -75,15 +78,18 @@ def yso(mjd, hist=[], **kwargs):
     hist: list, list of previous MJDs
     """
 
-    if len(hist) == 0:
-        return True
-    elif len(hist) == 1:
-        return mjd - hist[0] > 2
-    elif len(hist) > 1:
-        # this attempts to allow for more exposures than expected
-        return mjd - hist[-1] > 19
-    else:
-        return False
+    # if len(hist) == 0:
+    #     return True
+    # elif len(hist) == 1:
+    #     return mjd - hist[0] > 2
+    # elif len(hist) > 1:
+    #     # this attempts to allow for more exposures than expected
+    #     return mjd - hist[-1] > 19
+    # else:
+    #     return False
+
+    sn = kwargs.get("sn", 0)
+    return len(hist) < 3 and sn >= 1600
 
 
 def rv6(mjd, hist=[], **kwargs):
@@ -95,6 +101,9 @@ def rv6(mjd, hist=[], **kwargs):
 
     hist: list, list of previous MJDs
     """
+
+    # covid 4 plug per night solution
+    return True
 
     if len(hist) == 0:
         return True
@@ -121,6 +130,9 @@ def rv12(mjd, hist=[], **kwargs):
 
     hist: list, list of previous MJDs
     """
+
+    # covid 4 plug per night solution
+    return True
 
     if len(hist) == 0:
         return True
