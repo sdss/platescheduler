@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 from time import time
 import os
 from collections import defaultdict
+import warnings
 
 import numpy as np
 import scipy.optimize as optimize
@@ -36,6 +37,31 @@ sn_reqs = {"RM": {"r1": 40, "b1": 18},
 def rb_dict():
     # we're abusing the ddict default_factory
     return {"r1": 0, "b1": 0}
+
+
+def pull_boss_hist(session, exposedPlates):
+    boss_plate_exps = {int(p): defaultdict(rb_dict) for p in exposedPlates}
+
+    # grad all exposures, use reqs from modelClasses
+    boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
+                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
+                .join(pdb.Exposure).join(pdb.Observation)\
+                .join(pdb.Plugging).join(pdb.Plate)\
+                .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
+                .filter(pdb.ExposureFlavor.label == 'Science')\
+                .filter(pdb.ExposureStatus.label == 'Good')\
+                .filter(pdb.CameraFrame.sn2 > 0.2)\
+                .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
+
+    for e in boss_exps:
+        mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
+        exp = e[0]
+        if exp.camera.label == "r1":
+            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += exp.sn2
+        else:
+            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += exp.sn2
+
+    return boss_plate_exps
 
 
 def get_plates(session):
@@ -103,19 +129,10 @@ def get_plates(session):
                 .filter(pdb.ExposureFlavor.label == 'Object')\
                 .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
 
-    # grad all exposures, use reqs from modelClasses
-    boss_exps = session.query(pdb.CameraFrame, pdb.Plate.plate_id,
-                              sqlalchemy.func.floor(pdb.Exposure.start_time/86400+.3))\
-                .join(pdb.Exposure).join(pdb.Observation)\
-                .join(pdb.Plugging).join(pdb.Plate)\
-                .join(pdb.ExposureFlavor).join(pdb.ExposureStatus)\
-                .filter(pdb.ExposureFlavor.label == 'Science')\
-                .filter(pdb.ExposureStatus.label == 'Good')\
-                .filter(pdb.CameraFrame.sn2 > 0.2)\
-                .filter(pdb.Plate.plate_id.in_(exposedPlates)).all()
-
     apg_plate_exps = {int(p): [] for p in exposedPlates}
-    boss_plate_exps = {int(p): defaultdict(rb_dict) for p in exposedPlates}
+    apg_plate_sn = {int(p): 0 for p in exposedPlates}
+
+    boss_plate_exps = pull_boss_hist(session, exposedPlates)
 
     q2Time = time()
     print('[SQL]: exp query completed in {} s'.format(q2Time-q1Time))
@@ -124,23 +141,17 @@ def get_plates(session):
         mjd = int(e[0])  # sqlalchemy.func doesn't give an attribute
         if e.snr > 10:
             apg_plate_exps[int(e.plate_id)].append(mjd)
+            apg_plate_sn[int(e.plate_id)] += e.snr**2
         elif not e.snr and e.snr_standard > 10:
             apg_plate_exps[int(e.plate_id)].append(mjd)
-
-    for e in boss_exps:
-        mjd = int(e[2])  # sqlalchemy.func doesn't give an attribute
-        exp = e[0]
-        if exp.camera.label == "r1":
-            boss_plate_exps[int(e.plate_id)][mjd]["r1"] += exp.sn2
-        else:
-            boss_plate_exps[int(e.plate_id)][mjd]["b1"] += exp.sn2
+            apg_plate_sn[int(e.plate_id)] += e.snr_standard**2
 
     # for p, ms in boss_plate_exps.items():
     #     for m, sn in ms.items():
     #         print(p, m, sn["r1"], sn["b1"])
 
     field_exp_hist = defaultdict(list)
-    mwm_field_hist = defaultdict(list)
+    # mwm_field_hist = defaultdict(list)
     # field dict of mjd dict
     bhm_field_hist = defaultdict(lambda: defaultdict(rb_dict))
 
@@ -154,6 +165,7 @@ def get_plates(session):
     SKYBRIGHTNESS = list()
     CADENCE = list()
     PRIORITY = list()
+    SN_TOT = list()
 
     field_to_cadence = dict()
 
@@ -188,6 +200,10 @@ def get_plates(session):
         CADENCE.append(p.design.designDictionary["cadence"])
         PRIORITY.append(float(p.firstPointing.platePointing(p.plate_id).priority))
 
+        if PLATE_ID[-1] in apg_plate_sn:
+            SN_TOT.append(apg_plate_sn[PLATE_ID[-1]])
+        else:
+            SN_TOT.append(np.nan)
         field_to_cadence[FIELD[-1]] = CADENCE[-1]
 
         if survey_mode.lower() == "mwmlead":
@@ -198,7 +214,7 @@ def get_plates(session):
                 if len(day[0]) > 1:
                     # assume 2 exps count for a AB pair
                     # S/N checked elsewhere for now, so 1 maybe works?
-                    mwm_field_hist[field].append(m)
+                    field_exp_hist[field].append(m)
         else:
             for m, sn in boss_plate_exps[PLATE_ID[-1]].items():
                 bhm_field_hist[field][m]["r1"] += sn["r1"]
@@ -240,8 +256,8 @@ def get_plates(session):
                    ("HA_MAX", np.float64),
                    ("SKYBRIGHTNESS", np.float64),
                    ("CADENCE", np.dtype("a20")),
-                   ("PRIORITY", np.int32)]
-
+                   ("PRIORITY", np.int32),
+                   ("SN_TOT", np.float64)]
 
     plates = np.zeros(len(PLATE_ID), dtype=plate_types)
 
@@ -255,6 +271,7 @@ def get_plates(session):
     plates["SKYBRIGHTNESS"] = np.array(SKYBRIGHTNESS)
     plates["CADENCE"] = np.array(CADENCE)
     plates["PRIORITY"] = np.array(PRIORITY)
+    plates["SN_TOT"] = np.array(SN_TOT)
 
     buildTime = time()
     print('[PY]: array built in {} s'.format(buildTime - q1Time))
@@ -284,7 +301,7 @@ class Scheduler(object):
         self._carts = None
         self._plugged_plates = list()
 
-        self.bright_cadences = ["YSO", "RV6", "RV12"]
+        self.bright_cadences = ["YSO", "RV6", "RV12", "GG"]
 
         # Mike did a great job setting up bright/dark/observability rules
         # we'll just borrow that
@@ -363,7 +380,10 @@ class Scheduler(object):
                                 .order_by(pdb.Cartridge.number).all()
 
         for cart, plate in currentplug:
-            assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
+            # assert cart in self._carts, "CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart)
+            if cart not in self._carts:
+                warnings.warn("CART {} UNACOUNTED FOR. Update ~/.cart_status.yml".format(cart),
+                              UserWarning)
             self._carts[cart]["plate"] = plate
             self._plugged_plates.append(int(plate))
 
@@ -431,6 +451,8 @@ class Scheduler(object):
                 # for s in bright_starts + dark_starts:
                 #     print(s)
                 # raise Exception("no cart assigned for {}".format(s["plate"]))
+                warnings.warn("can't assign cart for {}".format(s["plate"]),
+                              UserWarning)
                 s["cart"] = -1
 
     def _inverseMoon(self, mjd):
@@ -539,7 +561,10 @@ class Scheduler(object):
                 if observable[i] and p["PRIORITY"] < 10:
                     field = p["FIELD"]
                     cad = p["CADENCE"]
-                    observable[i] = self.cadences[cad](mjd, hist=self.obs_hist[field], last_full_moon=self._last_full_moon)
+                    observable[i] = self.cadences[cad](mjd,
+                                                       hist=self.obs_hist[field],
+                                                       last_full_moon=self._last_full_moon,
+                                                       sn=p["SN_TOT"])
 
         return plates[observable]
 
@@ -603,14 +628,15 @@ class Scheduler(object):
         night_sched = {"start": night_start,
                        "end": night_end}
 
-        short_slot = self.gg_time / 60 / 24  # 30 min GG size
+        # short_slot = self.gg_time / 60 / 24  # 30 min GG size
         dark_slot = self.aqm_time / 60 / 24
+        bright_slot = self.apogee_time / 60 / 24
 
         overhead_jd = self.overhead / 60 / 24
 
         split_night = False
         if bright_start and bright_end:
-            bright_slots = int(nightLength // (short_slot + overhead_jd))
+            bright_slots = int(nightLength // (bright_slot + overhead_jd))
             rm_slots = 0
             dark_slots = 0
             night_sched["bright_start"] = night_start
@@ -647,7 +673,7 @@ class Scheduler(object):
                               args=self.dark_limit)
             bright_time = night_end - split
             dark_time = split - night_start
-            if bright_time < short_slot:
+            if bright_time < bright_slot:
                 night_sched["bright_start"] = 0
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
@@ -670,7 +696,7 @@ class Scheduler(object):
                               args=self.dark_limit)
             bright_time = split - night_start
             dark_time = night_end - split
-            if bright_time < short_slot:
+            if bright_time < bright_slot:
                 night_sched["bright_start"] = 0
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
@@ -690,9 +716,9 @@ class Scheduler(object):
             raise Exception("You broke boolean algebra!")
 
         if split_night:
-            bright_slots = int(bright_time // (short_slot + overhead_jd))
-            if bright_time - (bright_slots * (short_slot + overhead_jd)
-               - overhead_jd) > short_slot:
+            bright_slots = int(bright_time // (bright_slot + overhead_jd))
+            if bright_time - (bright_slots * (bright_slot + overhead_jd)
+               - overhead_jd) > bright_slot:
                 # we can take overhead off at beginning or end
                 bright_slots += 1
             if dark_time > (self.rm_time + self.overhead) / 60 / 24:
@@ -731,39 +757,54 @@ class Scheduler(object):
             used = dark_slots + rm_slots
             avail = min(len(self.carts) - used, len(bright_carts))
             # print(mjd, avail, len(self.carts) - used, len(bright_carts))
-            n = bright_slots - avail
-            if n <= 0:
-                print("THIS SHOULDN'T HAPPEN")
-                bright_slots_short = bright_slots
-                bright_slots_long = 0
-            else:
-                bright_slots_short = bright_slots - 2*n
-                bright_slots_long = n
-            if bright_slots_short < 0:
-                # this came up briefly in testing
-                bright_slots_short = 0
-            if bright_slots_long > avail:
-                # this also came up in testing with
-                # small number of carts, shouldn't happen in practice but...
-                bright_slots_long = avail
 
+            bright_slots_long = avail
+            bright_slots_short = 0
+        else:
+            bright_slots_long = bright_slots
+            bright_slots_short = 0
             bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
             bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
                                         - (self.apogee_time + self.overhead) * bright_slots_long
-            # print(f"waste:        {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
-            while bright_waste > 37:
-                # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
-                bright_slots_short -= 1
-                bright_slots_long += 1
-                bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
-                                            - (self.apogee_time + self.overhead) * bright_slots_long
-                # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
 
+            if bright_waste > 15 and slots + 1 <= len(self.carts):
+                bright_slots_short = 1
             assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
-                    <= len(self.carts), "cart assignment made up extra carts!"
-        else:
-            bright_slots_short = bright_slots
-            bright_slots_long = 0
+                   <= len(self.carts), "cart assignment made up extra carts!"
+
+        #     n = bright_slots - avail
+        #     if n <= 0:
+        #         print("THIS SHOULDN'T HAPPEN")
+        #         bright_slots_short = bright_slots
+        #         bright_slots_long = 0
+        #     else:
+        #         bright_slots_short = bright_slots - 2*n
+        #         bright_slots_long = n
+        #     if bright_slots_short < 0:
+        #         # this came up briefly in testing
+        #         bright_slots_short = 0
+        #     if bright_slots_long > avail:
+        #         # this also came up in testing with
+        #         # small number of carts, shouldn't happen in practice but...
+        #         bright_slots_long = avail
+
+        #     bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
+        #     bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+        #                                 - (self.apogee_time + self.overhead) * bright_slots_long
+        #     # print(f"waste:        {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+        #     while bright_waste > 37:
+        #         # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+        #         bright_slots_short -= 1
+        #         bright_slots_long += 1
+        #         bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
+        #                                     - (self.apogee_time + self.overhead) * bright_slots_long
+        #         # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
+
+        #     assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
+        #             <= len(self.carts), "cart assignment made up extra carts!"
+        # else:
+        #     bright_slots_short = bright_slots
+        #     bright_slots_long = 0
 
         # print(slots, "||", bright_slots_short, bright_slots_long, dark_slots, rm_slots)
         # print(night_sched)
@@ -924,8 +965,9 @@ class Scheduler(object):
             for i in range(len(dark_starts)):
                 pri_9_check = np.where(obs_aqm[i]["PRIORITY"] > 9)[0]
                 if len(pri_9_check) > 0:
-                    print("10!", obs_aqm[i][pri_9_check])
-                    assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
+                    # assert len(pri_9_check) == 1, "TOO MANY PRIORITY 10 PLATES"
+                    warnings.warn("TOO MANY PRIORITY 10 PLATES",
+                                  UserWarning)
                     this_plate = obs_aqm[i][pri_9_check]
                     if this_plate["PLATE_ID"] in tonight_ids:
                         continue
