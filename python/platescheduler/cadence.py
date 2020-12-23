@@ -65,7 +65,7 @@ def single(mjd, hist=[], **kwargs):
     # return len(hist) == 0
 
     sn = kwargs.get("sn", 0)
-    return sn >= 1600
+    return sn <= 1600
 
 
 def yso(mjd, hist=[], **kwargs):
@@ -89,7 +89,7 @@ def yso(mjd, hist=[], **kwargs):
     #     return False
 
     sn = kwargs.get("sn", 0)
-    return len(hist) < 3 and sn >= 1600
+    return len(hist) < 3 and sn <= 1600 * 3
 
 
 def rv6(mjd, hist=[], **kwargs):
