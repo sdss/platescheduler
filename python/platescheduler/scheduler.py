@@ -301,7 +301,7 @@ class Scheduler(object):
         self._carts = None
         self._plugged_plates = list()
 
-        self.bright_cadences = ["YSO", "RV6", "RV12"]
+        self.bright_cadences = ["YSO", "RV6", "RV12", "GG"]
 
         # Mike did a great job setting up bright/dark/observability rules
         # we'll just borrow that
@@ -757,17 +757,11 @@ class Scheduler(object):
             bright_total = (night_sched["bright_end"] - night_sched["bright_start"]) * 24 * 60
             bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
                                         - (self.apogee_time + self.overhead) * bright_slots_long
-            # print(f"waste:        {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
-            while bright_waste > 37:
-                # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
-                bright_slots_short -= 1
-                bright_slots_long += 1
-                bright_waste = bright_total - (self.gg_time + self.overhead) * bright_slots_short\
-                                            - (self.apogee_time + self.overhead) * bright_slots_long
-                # print(f"re-allocating {mjd} {bright_slots_short}, {bright_slots_long}, {bright_waste:.1f}")
 
+            if bright_waste > 15 and slots + 1 <= len(self.carts):
+                bright_slots_short = 1
             assert bright_slots_short + bright_slots_long + dark_slots + rm_slots\
-                    <= len(self.carts), "cart assignment made up extra carts!"
+                   <= len(self.carts), "cart assignment made up extra carts!"
 
         #     n = bright_slots - avail
         #     if n <= 0:
