@@ -102,6 +102,7 @@ def monthSim(sched, weather, mjd_start=59135, mjd_end=59165):
                               "len": b["exposure_length"]})
             if pid > 0:
                 sched.obs_hist[field].append(b["obsmjd"])
+                plate_dict[pid]["SN_TOT"] += 1601
 
         for b in dark_starts:
             if weather.clear(b["obsmjd"], returnNext=False):
