@@ -68,7 +68,8 @@ def mkFits(csv, outPath):
                    ("HA_MAX", np.float64),
                    ("SKYBRIGHTNESS", np.float64),
                    ("CADENCE", np.dtype("a20")),
-                   ("PRIORITY", np.int32)]
+                   ("PRIORITY", np.int32),
+                   ("SN_TOT", np.float64)]
 
     plates = np.zeros(len(plate_array), dtype=plate_types)
     plates["PLATE_ID"] = 2e4 + np.arange(len(plate_array))
