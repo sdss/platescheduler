@@ -185,8 +185,8 @@ def get_plates(session):
         RA.append(float(p.firstPointing.center_ra))
         DEC.append(float(p.firstPointing.center_dec))
         HA.append(float(p.firstPointing.platePointing(p.plate_id).hour_angle))
-        HA_MIN.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_min) - 7.5)
-        HA_MAX.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_max) + 7.5)
+        HA_MIN.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_min))  # - 7.5)
+        HA_MAX.append(float(p.firstPointing.platePointing(p.plate_id).ha_observable_max))  # + 7.5)
         if survey_mode.lower() == "mwmlead":
             SKYBRIGHTNESS.append(1)
         else:
@@ -491,12 +491,16 @@ class Scheduler(object):
         # print("{:.2f} {} {:.2f} {:.2f}".format(mjd, len(plates), window_lst_start, window_lst_end))
 
         for i, p in enumerate(plates):
-            start = (p["RA"] + p["HA_MIN"]) / 15.
+            if p["PRIORITY"] == 10:
+                fudge = 7.5
+            else:
+                fudge = 0
+            start = (p["RA"] + p["HA_MIN"] - fudge) / 15.
             if start < 0:
                 start += 24
             elif start > 24:
                 start -= 24
-            end = (p["RA"] + p["HA_MAX"]) / 15.
+            end = (p["RA"] + p["HA_MAX"] + fudge) / 15.
             if end < 0:
                 end += 24
             elif end > 24:
