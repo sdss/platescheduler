@@ -522,7 +522,7 @@ class Scheduler(object):
 
         moonra, moondec = self.Observer.moon_radec(mjd)
 
-        moon_dist = np.power((plates["RA"] - moonra)*np.cos(plates["DEC"]*np.pi), 2)\
+        moon_dist = np.power((plates["RA"] - moonra)*np.cos(plates["DEC"]*np.pi / 180), 2)\
                   + np.power((plates["DEC"] - moondec), 2)
 
         # (alt, az) = self.Observer.radec2altaz(mjd=mjd, ra=plates["RA"],
