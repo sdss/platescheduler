@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 
 import numpy as np
 from astropy.time import Time
@@ -12,8 +14,10 @@ def lst_to_hhmm(lst):
     return f"{hour:02d}:{minute:02d}"
 
 
-def makeDay(mjd):
-    bright_starts, dark_starts, night_sched = sched.scheduleMjd(mjd)
+def makeDay(mjd, sched=None, engineering="---"):
+    assert sched is not None, "Scheduler must be supplied to makeDay"
+    night_sched, gg_len, long_bright, dark_lengths, rm_lengths, waste = \
+        sched.makeSlots(mjd)
 
     startTime = Time(night_sched["start"], format="mjd").datetime
     endTime = Time(night_sched["end"], format="mjd").datetime
@@ -39,7 +43,7 @@ def makeDay(mjd):
     form_str = f"{day_format:18s} {mjd:5d}  {float(moon):.2f}  " +\
                f"{int(startTime.hour):02d}:{int(startTime.minute):02d}  " +\
                f"{int(endTime.hour):02d}:{int(endTime.minute):02d}   " +\
-               f"{lst_start}  {lst_end}   {engineering}   XX  " 
+               f"{lst_start}  {lst_end}   {engineering:5s}   XX  "
 
     dark_time = (night_sched["dark_end"] - night_sched["dark_start"]) * 24
     bright_time = (night_sched["bright_end"] - night_sched["bright_start"]) * 24
@@ -57,7 +61,7 @@ def makeDay(mjd):
     else:
         assert False, "you broke something"
 
-    form_str += time_sum
+    form_str += time_sum + "\n"
 
     return form_str
 
@@ -75,23 +79,24 @@ def makeSched(start, stop, outDir="", name="MS"):
         engineering = "---"
         if sched.Observer.moon_illumination(m) > 0.98:
             engineering = "Day"
-            if m - last_engineering > 2:
+            if m - last_engineering > 3:
                 last_engineering = m
                 engineering = "Night"
 
-        sched_str += makeDay(mjd)
+        sched_str += makeDay(m, sched=sched, engineering=engineering)
 
     fname = outDir + name + ".dat"
     with open(fname, "w") as outFile:
         print(sched_str, file=outFile)
+
+    print(f"schedule written to {fname}")
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog=os.path.basename(sys.argv[0]),
-        description="""Create fiveplates plate fits input or intermediate csv
-                       files.""")
+        description="""create master schedule""")
 
     parser.add_argument("-s", "--start", dest="start", type=int,
                         required=False, help="mjd to start on",
@@ -110,7 +115,7 @@ if __name__ == "__main__":
     start = args.start
     end = args.end
     outPath = args.out
-    name = args.out
+    name = args.name
 
     if start is None:
         start = int(Time(Time.now(), format="mjd").value)
@@ -118,4 +123,4 @@ if __name__ == "__main__":
     if end is None:
         end = start + 30
 
-    makeSched(start, stop, outDir=outPath, name=name)
+    makeSched(start, end, outDir=outPath, name=name)
