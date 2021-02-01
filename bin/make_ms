@@ -1,0 +1,121 @@
+import argparse
+
+import numpy as np
+from astropy.time import Time
+
+from platescheduler.scheduler import Scheduler
+
+
+def lst_to_hhmm(lst):
+    hour = int(lst // 1)
+    minute = int((lst - hour) * 60 // 1)
+    return f"{hour:02d}:{minute:02d}"
+
+
+def makeDay(mjd):
+    bright_starts, dark_starts, night_sched = sched.scheduleMjd(mjd)
+
+    startTime = Time(night_sched["start"], format="mjd").datetime
+    endTime = Time(night_sched["end"], format="mjd").datetime
+
+    bright_start = Time(night_sched["bright_start"], format="mjd").datetime
+    bright_end = Time(night_sched["bright_end"], format="mjd").datetime
+
+    dark_start = Time(night_sched["dark_start"], format="mjd").datetime
+    dark_end = Time(night_sched["dark_end"], format="mjd").datetime
+
+    lst_start = float(sched.Observer.lst(night_sched["start"]))/15
+    lst_end = float(sched.Observer.lst(night_sched["end"]))/15
+
+    lst_start = lst_to_hhmm(lst_start)
+    lst_end = lst_to_hhmm(lst_end)
+
+    aTime = Time(mjd-1, format="mjd").datetime
+
+    # day dd MON yyyy
+    day_format = aTime.strftime("%a %d %b %Y")
+    moon = sched.Observer.moon_illumination(np.median([night_sched["start"], night_sched["end"]]))
+
+    form_str = f"{day_format:18s} {mjd:5d}  {float(moon):.2f}  " +\
+               f"{int(startTime.hour):02d}:{int(startTime.minute):02d}  " +\
+               f"{int(endTime.hour):02d}:{int(endTime.minute):02d}   " +\
+               f"{lst_start}  {lst_end}   {engineering}   XX  " 
+
+    dark_time = (night_sched["dark_end"] - night_sched["dark_start"]) * 24
+    bright_time = (night_sched["bright_end"] - night_sched["bright_start"]) * 24
+
+    if bright_time and not dark_time:
+        time_sum = f"MWM ({bright_time:4.1f} h)"
+    elif dark_time and not bright_time:
+        time_sum = f"MWM ({dark_time:4.1f} h)"
+    elif night_sched["bright_start"] < night_sched["dark_start"]:
+        time_sum = f"MWM until {bright_end.hour:02d}:{bright_end.minute:02d} ({bright_time:4.1f} h), " +\
+                   f"then BHM ({dark_time:4.1f} h)"
+    elif night_sched["dark_start"] < night_sched["bright_start"]:
+        time_sum = f"BHM until {dark_end.hour:02d}:{dark_end.minute:02d} ({dark_time:4.1f} h), " +\
+                   f"then MWM ({bright_time:4.1f} h)"
+    else:
+        assert False, "you broke something"
+
+    form_str += time_sum
+
+    return form_str
+
+
+def makeSched(start, stop, outDir="", name="MS"):
+    sched = Scheduler(session=1)  # , platePath="nov/five_plates.fits")
+
+    mjds = np.arange(start, stop, 1)
+
+    sched_str = ""
+
+    last_engineering = 0
+    for m in mjds:
+        m = int(m)
+        engineering = "---"
+        if sched.Observer.moon_illumination(m) > 0.98:
+            engineering = "Day"
+            if m - last_engineering > 2:
+                last_engineering = m
+                engineering = "Night"
+
+        sched_str += makeDay(mjd)
+
+    fname = outDir + name + ".dat"
+    with open(fname, "w") as outFile:
+        print(sched_str, file=outFile)
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description="""Create fiveplates plate fits input or intermediate csv
+                       files.""")
+
+    parser.add_argument("-s", "--start", dest="start", type=int,
+                        required=False, help="mjd to start on",
+                        default=None)
+    parser.add_argument("-e", "--end", dest="end", type=str,
+                        required=False, help="end mjd",
+                        default=None)
+    parser.add_argument("-o", "--out", dest="out", type=str,
+                        required=False, help="output directory, default current",
+                        default="")
+    parser.add_argument("-n", "--name", dest="name", type=str,
+                        required=False, help="file name, default MS",
+                        default="MS")
+
+    args = parser.parse_args()
+    start = args.start
+    end = args.end
+    outPath = args.out
+    name = args.out
+
+    if start is None:
+        start = int(Time(Time.now(), format="mjd").value)
+
+    if end is None:
+        end = start + 30
+
+    makeSched(start, stop, outDir=outPath, name=name)
