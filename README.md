@@ -9,7 +9,7 @@ autoscheduler for sdss5 plate program, now with master schedule tools!
 
 ## Install
 
-To use the simulations, checkout a copy of the repo and switch to the makeMS branch:
+To create a new schedule, checkout a copy of the repo and switch to the makeMS branch:
 
     git clone https://github.com/sdss/platescheduler.git 
     git checkout makeMS
