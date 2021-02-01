@@ -85,7 +85,7 @@ def makeSched(start, stop, outDir="", name="MS"):
 
         sched_str += makeDay(m, sched=sched, engineering=engineering)
 
-    fname = outDir + name + ".dat"
+    fname = os.path.join(outDir, name + ".dat")
     with open(fname, "w") as outFile:
         print(sched_str, file=outFile)
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--start", dest="start", type=int,
                         required=False, help="mjd to start on",
                         default=None)
-    parser.add_argument("-e", "--end", dest="end", type=str,
+    parser.add_argument("-e", "--end", dest="end", type=int,
                         required=False, help="end mjd",
                         default=None)
     parser.add_argument("-o", "--out", dest="out", type=str,
