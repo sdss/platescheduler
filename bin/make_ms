@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import argparse
 import os
 import sys
@@ -51,7 +54,7 @@ def makeDay(mjd, sched=None, engineering="---"):
     if bright_time and not dark_time:
         time_sum = f"MWM ({bright_time:4.1f} h)"
     elif dark_time and not bright_time:
-        time_sum = f"MWM ({dark_time:4.1f} h)"
+        time_sum = f"BHM ({dark_time:4.1f} h)"
     elif night_sched["bright_start"] < night_sched["dark_start"]:
         time_sum = f"MWM until {bright_end.hour:02d}:{bright_end.minute:02d} ({bright_time:4.1f} h), " +\
                    f"then BHM ({dark_time:4.1f} h)"
