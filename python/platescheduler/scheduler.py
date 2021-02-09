@@ -8,8 +8,8 @@ import warnings
 
 import numpy as np
 import scipy.optimize as optimize
-# from astropy.time import Time
-# import fitsio # TEST
+from astropy.time import Time
+# import fitsio  # TEST
 
 import sqlalchemy
 from sqlalchemy import or_
@@ -597,11 +597,12 @@ class Scheduler(object):
         night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-15)
         night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-15)
 
+        startTime = Time(night_start, format="mjd").datetime
+
         # print("MJD!! ", mjd)
         # print("mm/dd hh/mm-> moonalt lum from_dark_lim")
         # for i in range(20):
         #     delay = i*30 / 60 / 24
-        #     startTime = Time(night_start + delay, format="mjd").datetime
         #     tstring = "{:2d}/{:02d} {:2d}:{:02d}".format(startTime.month, startTime.day, startTime.hour, startTime.minute)
         #     malt, maz = self.Observer.moon_altaz(night_start + delay)
         #     print("{}-> {:+06.2f} {:.2f} {:+.2f}".format(tstring, float(malt),
@@ -616,10 +617,20 @@ class Scheduler(object):
         dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
         dark_end = bool(self.Observer.skybrightness(night_end - fudge) < 0.35)
 
+        mon = startTime.month
+        day = startTime.day
+
         if bright_start:
-            night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
+            night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
         if bright_end:
-            night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
+            if mon > 3 and mon < 9:
+                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+            elif mon == 3 and day >= 21:
+                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+            elif mon == 9 and day <= 21:
+                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+            else:
+                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
         nightLength = night_end - night_start
         night_sched = {"start": night_start,
                        "end": night_end}
