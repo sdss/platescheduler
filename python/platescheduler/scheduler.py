@@ -629,15 +629,22 @@ class Scheduler(object):
 
         mon = startTime.month
         day = startTime.day
+        if mon > 3 and mon < 9:
+            summer = True
+        elif mon == 3 and day >= 21:
+            summer = True
+        elif mon == 9 and day <= 21:
+            summer = True
+        else:
+            summer = False
 
         if bright_start:
-            night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
+            if summer:
+                night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
+            else:
+                night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
         if bright_end:
-            if mon > 3 and mon < 9:
-                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
-            elif mon == 3 and day >= 21:
-                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
-            elif mon == 9 and day <= 21:
+            if summer:
                 night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
             else:
                 night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
