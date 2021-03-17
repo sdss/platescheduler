@@ -69,6 +69,42 @@ def makeDay(mjd, sched=None, engineering="---"):
     return form_str
 
 
+def sched_engineering(mjds, sched):
+    illum = sched.Observer.moon_illumination(mjds)
+
+    full = np.where(illum > 0.98)[0]
+
+    days = list()
+    nights = list()
+    last_night = 0
+    for i in full:
+        m = int(mjds[i])
+        if m - last_night < 5:
+            continue
+        aTime = Time(m-1, format="mjd").datetime
+        if aTime.isoweekday() == 6:
+            nights.append(m-1)
+            days.append(m-2)
+            last_night = m
+        elif aTime.isoweekday() == 7:
+            nights.append(m+1)
+            days.append(m+2)
+            last_night = m
+        # elif aTime.isoweekday() == 5:
+        #     nights.append(m)
+        #     days.append(m-1)
+        #     last_night = m
+        elif aTime.isoweekday() == 1:
+            nights.append(m)
+            days.append(m+1)
+            last_night = m
+        else:
+            nights.append(m)
+            days.append(m-1)
+            last_night = m
+
+    return days, nights
+
 def makeSched(start, stop, outDir="", name="MS"):
     sched = Scheduler(session=1)  # , platePath="nov/five_plates.fits")
 
@@ -76,15 +112,19 @@ def makeSched(start, stop, outDir="", name="MS"):
 
     sched_str = ""
 
-    last_engineering = 0
+    days, nights = sched_engineering(mjds, sched)
     for m in mjds:
         m = int(m)
         engineering = "---"
-        if sched.Observer.moon_illumination(m) > 0.98:
+        if m in days:
             engineering = "Day"
-            if m - last_engineering > 3:
-                last_engineering = m
-                engineering = "Night"
+        elif m in nights:
+            engineering = "Night"
+        # if sched.Observer.moon_illumination(m) > 0.98:
+        #     engineering = "Day"
+        #     if m - last_engineering > 3:
+        #         last_engineering = m
+        #         engineering = "Night"
 
         sched_str += makeDay(m, sched=sched, engineering=engineering)
 
