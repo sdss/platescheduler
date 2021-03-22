@@ -703,6 +703,9 @@ class Scheduler(object):
                 night_sched["dark_start"] = night_start
                 night_sched["dark_end"] = night_end
             elif dark_time < dark_slot:
+                if summer:
+                    night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
+                    night_sched["start"] = night_start
                 night_sched["bright_start"] = night_start
                 night_sched["bright_end"] = night_end
                 night_sched["dark_start"] = 0
@@ -726,6 +729,9 @@ class Scheduler(object):
                 night_sched["dark_start"] = night_start
                 night_sched["dark_end"] = night_end
             elif dark_time < dark_slot:
+                if summer:
+                    night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+                    night_sched["end"] = night_end
                 night_sched["bright_start"] = night_start
                 night_sched["bright_end"] = night_end
                 night_sched["dark_start"] = 0
