@@ -626,31 +626,38 @@ class Scheduler(object):
         bright_end = bool(self.Observer.skybrightness(night_end - fudge) >= 0.35)
         dark_start = bool(self.Observer.skybrightness(night_start + fudge) < 0.35)
         dark_end = bool(self.Observer.skybrightness(night_end - fudge) < 0.35)
+        twelvedeg_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
+        extra_time = night_start - twelvedeg_start
 
-        mon = startTime.month
-        day = startTime.day
-        if mon > 3 and mon < 9:
-            summer = True
-        elif mon == 3 and day >= 21:
-            summer = True
-        elif mon == 9 and day <= 21:
-            summer = True
-        else:
-            summer = False
+        #mon = startTime.month
+        #day = startTime.day
+        #if mon > 3 and mon < 9:
+        #    summer = True
+        #elif mon == 3 and day >= 21:
+        #    summer = True
+        #elif mon == 9 and day <= 21:
+        #    summer = True
+        #else:
+        #    summer = False
 
-        if bright_start:
-            if summer:
-                night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
-            else:
-                night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
-        if bright_end:
-            if summer:
-                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
-            else:
-                night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
+        #if bright_start:
+        #    if summer:
+        #        night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
+        #    else:
+        #    night_start = 12deg_start
+        #    extra_time = 0.
+        #else:
+        
+        #if bright_end:
+        #    if summer:
+        #        night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+        #    else:
+        #        night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-12)
         nightLength = night_end - night_start
         night_sched = {"start": night_start,
-                       "end": night_end}
+                       "end": night_end,
+                       "extra_time": extra_time,
+                       "twelvedeg_start": twelvedeg_start}
 
         # short_slot = self.gg_time / 60 / 24  # 30 min GG size
         dark_slot = self.aqm_time / 60 / 24
@@ -667,6 +674,8 @@ class Scheduler(object):
             night_sched["bright_end"] = night_end
             night_sched["dark_start"] = 0
             night_sched["dark_end"] = 0
+            night_sched["extra_time"] = extra_time
+            night_sched["twelvedeg_start"] = twelvedeg_start
         elif dark_start and dark_end:
             # we WILL have an RM plate, assume it gets no overhead
             # even if it isn't first or last it's easier this way
@@ -674,6 +683,8 @@ class Scheduler(object):
             night_sched["bright_end"] = 0
             night_sched["dark_start"] = night_start
             night_sched["dark_end"] = night_end
+            night_sched["extra_time"] = extra_time
+            night_sched["twelvedeg_start"] = twelvedeg_start
             remainder = nightLength - (self.rm_time + self.overhead) / 60 / 24
             rm_slots = 2
             dark_slots = int(remainder // (dark_slot + overhead_jd))
@@ -702,19 +713,25 @@ class Scheduler(object):
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
                 night_sched["dark_end"] = night_end
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
             elif dark_time < dark_slot:
-                if summer:
-                    night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-8)
-                    night_sched["start"] = night_start
+                #if summer:
+                #night_start = self.Observer.evening_twilight(mjd=mjd, twilight=-12)
+                #night_sched["start"] = night_start
                 night_sched["bright_start"] = night_start
                 night_sched["bright_end"] = night_end
                 night_sched["dark_start"] = 0
                 night_sched["dark_end"] = 0
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
             else:
                 night_sched["bright_start"] = split
                 night_sched["bright_end"] = night_end
                 night_sched["dark_start"] = night_start
                 night_sched["dark_end"] = split
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
 
         elif bright_start and dark_end:
             split_night = True
@@ -728,19 +745,26 @@ class Scheduler(object):
                 night_sched["bright_end"] = 0
                 night_sched["dark_start"] = night_start
                 night_sched["dark_end"] = night_end
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
             elif dark_time < dark_slot:
-                if summer:
-                    night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
-                    night_sched["end"] = night_end
+                #if summer:
+                #    night_end = self.Observer.morning_twilight(mjd=mjd, twilight=-8)
+                #    night_sched["end"] = night_end
                 night_sched["bright_start"] = night_start
                 night_sched["bright_end"] = night_end
                 night_sched["dark_start"] = 0
                 night_sched["dark_end"] = 0
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
+
             else:
                 night_sched["bright_start"] = night_start
                 night_sched["bright_end"] = split
                 night_sched["dark_start"] = split
                 night_sched["dark_end"] = night_end
+                night_sched["extra_time"] = extra_time
+                night_sched["twelvedeg_start"] = twelvedeg_start
 
         else:
             raise Exception("You broke boolean algebra!")

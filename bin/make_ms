@@ -25,6 +25,8 @@ def makeDay(mjd, sched=None, engineering="---"):
     startTime = Time(night_sched["start"], format="mjd").datetime
     endTime = Time(night_sched["end"], format="mjd").datetime
 
+    twelvedegTime = Time(night_sched["twelvedeg_start"], format="mjd").datetime
+    
     bright_start = Time(night_sched["bright_start"], format="mjd").datetime
     bright_end = Time(night_sched["bright_end"], format="mjd").datetime
 
@@ -43,24 +45,25 @@ def makeDay(mjd, sched=None, engineering="---"):
     day_format = aTime.strftime("%a %d %b %Y")
     moon = sched.Observer.moon_illumination(np.median([night_sched["start"], night_sched["end"]]))
 
-    form_str = f"{day_format:18s} {mjd:5d}  {float(moon):.2f}  " +\
+    form_str = f"{day_format:18s} {mjd:5d}   {float(moon):.2f}   {int(twelvedegTime.hour):02d}:{int(twelvedegTime.minute):02d}   " +\
                f"{int(startTime.hour):02d}:{int(startTime.minute):02d}  " +\
-               f"{int(endTime.hour):02d}:{int(endTime.minute):02d}   " +\
-               f"{lst_start}  {lst_end}   {engineering:5s}   XX  "
+               f"{int(endTime.hour):02d}:{int(endTime.minute):02d}    " +\
+               f"{lst_start}  {lst_end}   {engineering:5s}   "
 
     dark_time = (night_sched["dark_end"] - night_sched["dark_start"]) * 24
     bright_time = (night_sched["bright_end"] - night_sched["bright_start"]) * 24
-
+    extra_time = night_sched["extra_time"] * 24
+        
     if bright_time and not dark_time:
-        time_sum = f"MWM ({bright_time:4.1f} h)"
+        time_sum = f"bright ({bright_time+extra_time:4.1f} h, w/ {extra_time:3.1f} h for 12 deg design)"
     elif dark_time and not bright_time:
-        time_sum = f"BHM ({dark_time:4.1f} h)"
+        time_sum = f"dark ({dark_time:4.1f} h) plus {extra_time:3.1f} h for 12 deg design"
     elif night_sched["bright_start"] < night_sched["dark_start"]:
-        time_sum = f"MWM until {bright_end.hour:02d}:{bright_end.minute:02d} ({bright_time:4.1f} h), " +\
-                   f"then BHM ({dark_time:4.1f} h)"
+        time_sum = f"bright until {bright_end.hour:02d}:{bright_end.minute:02d} ({bright_time+extra_time:4.1f} h, " +\
+                   f"w/ {extra_time:3.1f} h for 12 deg design), then dark ({dark_time:4.1f} h)"
     elif night_sched["dark_start"] < night_sched["bright_start"]:
-        time_sum = f"BHM until {dark_end.hour:02d}:{dark_end.minute:02d} ({dark_time:4.1f} h), " +\
-                   f"then MWM ({bright_time:4.1f} h)"
+        time_sum = f"dark until {dark_end.hour:02d}:{dark_end.minute:02d} ({dark_time:4.1f} h), " +\
+                   f"then bright ({bright_time+extra_time:4.1f} h, w/ {extra_time:3.1f} h for 12 deg design)"
     else:
         assert False, "you broke something"
 
